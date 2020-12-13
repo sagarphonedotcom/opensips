@@ -357,7 +357,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 		}
 			if(rec->expires==0){
 				LM_ERR("Contact unregistered successfully %s\n",rec->contact_uri);
-				goto done;
+				rec->state = UNREGISTERED_STATE;
+				break;
 			}
 				
 				if (msg->contact) {
