@@ -79,6 +79,7 @@ static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 	int n;
         int l = 0;
         char *ch;
+	str *random;
 
        
         n = rand();
@@ -87,9 +88,11 @@ static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 
 	call_id_ftag->len = MD5_LEN;
 	call_id_ftag->s = call_id_ftag_buf;
+	random->len = &l;
+	random->s= ch;
 
 	src[i++] = *aor;
-	src[i++]= *ch;
+	src[i++]= *random;
 	if(now->s && now->len)
 		src[i++] = *now;
 	
