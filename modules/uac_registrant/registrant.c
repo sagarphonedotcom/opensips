@@ -755,13 +755,25 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	*p = '>'; p++;
 	memcpy(p, rec->contact_params.s, rec->contact_params.len);
 	p += rec->contact_params.len;
-
+	if (1) {
+		/* adding exiration time as a parameter */
+		memcpy(p, expires_param.s, expires_param.len);
+		p += expires_param.len;
+	} else {
+		/* adding exiration time as a header */
+		memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
+		memcpy(p, expires_hdr.s, expires_hdr.len);
+		p += expires_hdr.len;
+	}
+	memcpy(p, expires, expires_len);
+	p += expires_len;
+	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
 	/* adding exires header */
-	memcpy(p, expires_hdr.s, expires_hdr.len);
+	/*memcpy(p, expires_hdr.s, expires_hdr.len);
 	p += expires_hdr.len;
 	*p = '0'; p++;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-
+*/
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
 		p += auth_hdr->len;
