@@ -817,12 +817,20 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 			break;
 		}
 	case NOT_REGISTERED_STATE:
-		if(send_register(i, rec, NULL)==1) {
-			rec->last_register_sent = now;
-			rec->state = REGISTERING_STATE;
-		} else {
-			rec->registration_timeout = now + rec->expires - timer_interval;
-			rec->state = INTERNAL_ERROR_STATE;
+		if(rec->expires==0){
+			if(send_unregister(i, rec, NULL)==1) {
+				rec->state = UNREGISTERING_STATE;
+			} else {
+				rec->state = INTERNAL_ERROR_STATE;
+			}
+		}else{
+			if(send_register(i, rec, NULL)==1) {
+				rec->last_register_sent = now;
+				rec->state = REGISTERING_STATE;
+			} else {
+				rec->registration_timeout = now + rec->expires - timer_interval;
+				rec->state = INTERNAL_ERROR_STATE;
+			}
 		}
 		break;
 	default:
