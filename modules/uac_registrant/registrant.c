@@ -502,6 +502,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 
 		switch(rec->state) {
 		case REGISTERING_STATE:
+		case REGISTERED_STATE:
 		case UNREGISTERING_STATE:
 			break;
 		case AUTHENTICATING_STATE:
