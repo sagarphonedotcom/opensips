@@ -63,6 +63,7 @@
 #define UAC_REG_REGISTRAR_ERROR_STATE   "REGISTRAR_ERROR_STATE"
 #define UAC_REG_UNREGISTERING_STATE		"UNREGISTERING_STATE"
 #define UAC_REG_AUTHENTICATING_UNREGISTER_STATE	"AUTHENTICATING_UNREGISTER_STATE"
+#define UAC_REG_UNREGISTER_STATE	"UNREGISTERED_STATE"
 
 const str uac_reg_state[]={
 	str_init(UAC_REG_NOT_REGISTERED_STATE),
@@ -75,6 +76,7 @@ const str uac_reg_state[]={
 	str_init(UAC_REG_REGISTRAR_ERROR_STATE),
 	str_init(UAC_REG_UNREGISTERING_STATE),
 	str_init(UAC_REG_AUTHENTICATING_UNREGISTER_STATE),
+	str_init(UAC_REG_UNREGISTERED_STATE),
 };
 
 /** Functions declarations */
@@ -366,6 +368,9 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			}
 		} else {
 			switch(rec->state) {
+			case UNREGISTERED_STATE:
+					LM_DBG("Contact unregistered\n");
+					goto done;
 			case UNREGISTERING_STATE:
 			case AUTHENTICATING_UNREGISTER_STATE:
 				if(send_register(cb_param->hash_index, rec, NULL)==1) {
