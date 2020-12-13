@@ -747,8 +747,14 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	p = extra_hdrs.s;
 	memcpy(p, contact_hdr.s, contact_hdr.len);
 	p += contact_hdr.len;
-	*p = '*'; p++;
-	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
+	/**p = '*'; p++;
+	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;*/
+	*p = '<'; p++;
+	memcpy(p, rec->contact_uri.s, rec->contact_uri.len);
+	p += rec->contact_uri.len;
+	*p = '>'; p++;
+	memcpy(p, rec->contact_params.s, rec->contact_params.len);
+	p += rec->contact_params.len;
 
 	/* adding exires header */
 	memcpy(p, expires_hdr.s, expires_hdr.len);
