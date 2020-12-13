@@ -355,11 +355,10 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to parse headers\n");
 			goto done;
 		}
-		switch(rec->state) {
-		    	case UNREGISTERED_STATE:
-				LM_DBG("Contact unregistered\n");
+			if(rec->expires==0){
+				LM_ERR("Contact unregistered successfully %s\n",rec->contact_uri);
 				goto done;
-			default:
+			}
 				
 				if (msg->contact) {
 					c_ptr = msg->contact;
@@ -467,8 +466,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 				}
 				rec->registration_timeout = now + rec->expires - timer_interval;
 				break;
-		 }
-
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
 		msg = ps->rpl;
@@ -557,7 +554,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			break;
 		case UNREGISTERING_STATE:
 			if(send_unregister(cb_param->hash_index, rec, new_hdr)==1) {
-				rec->state = UNREGISTERED_STATE;
+				rec->state = AUTHENTICATING_UNREGISTER_STATE;
 			} else {
 				rec->state = INTERNAL_ERROR_STATE;
 			}
