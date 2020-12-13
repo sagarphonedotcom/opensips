@@ -824,7 +824,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	case NOT_REGISTERED_STATE:
 		if(rec->expires==0){
 			if(send_unregister(i, rec, NULL)==1) {
-				rec->state = UNREGISTERING_STATE;
+				rec->state = UNREGISTERED_STATE;
 			} else {
 				rec->state = INTERNAL_ERROR_STATE;
 			}
