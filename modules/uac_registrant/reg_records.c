@@ -75,7 +75,7 @@ void reg_print_record(reg_record_t *rec) {
 static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 {
 	int i = 0;
-	str src[2];
+	str src[3];
 	int n;
         int l = 0;
         str *ch;
