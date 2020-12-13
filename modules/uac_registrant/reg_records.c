@@ -92,7 +92,7 @@ static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 	random_string.s= ch;
 
 	src[i++] = *aor;
-	src[i++]= random_string;
+	src[i++]= &random_string;
 	if(now->s && now->len)
 		src[i++] = *now;
 	
