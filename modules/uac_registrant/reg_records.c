@@ -78,7 +78,7 @@ static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 	str src[2];
 	int n;
         int l = 0;
-        char *ch;
+        str *ch;
 
        
         n = rand();
