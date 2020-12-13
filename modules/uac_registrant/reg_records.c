@@ -76,13 +76,24 @@ static void gen_call_id_ftag(str *aor, str *now, str *call_id_ftag)
 {
 	int i = 0;
 	str src[2];
+	int n;
+        int l = 0;
+        char *ch;
+
+       
+        n = rand();
+	ch = int2str(n , &l);
+
 
 	call_id_ftag->len = MD5_LEN;
 	call_id_ftag->s = call_id_ftag_buf;
 
 	src[i++] = *aor;
+	src[i++]= *ch;
 	if(now->s && now->len)
 		src[i++] = *now;
+	
+	
 
 	MD5StringArray(call_id_ftag->s, src, i);
 	return;
