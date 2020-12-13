@@ -799,6 +799,8 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	switch(rec->state){
 	case REGISTERING_STATE:
 	case UNREGISTERING_STATE:
+	case UNREGISTERD_STATE:
+		break;
 	case AUTHENTICATING_STATE:
 	case AUTHENTICATING_UNREGISTER_STATE:
 		break;
