@@ -355,115 +355,119 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to parse headers\n");
 			goto done;
 		}
-		if (msg->contact) {
-			c_ptr = msg->contact;
-			while(c_ptr) {
-				if (c_ptr->type == HDR_CONTACT_T) {
-					if (!c_ptr->parsed && (parse_contact(c_ptr)<0)) {
-						LM_ERR("failed to parse Contact body\n");
-						goto done;
-					}
-				}
-				c_ptr = c_ptr->next;
-			}
-		} else {
-			switch(rec->state) {
-			case UNREGISTERED_STATE:
-					LM_DBG("Contact unregistered\n");
-					goto done;
-			case UNREGISTERING_STATE:
-			case AUTHENTICATING_UNREGISTER_STATE:
-				if(send_register(cb_param->hash_index, rec, NULL)==1) {
-					rec->last_register_sent = now;
-					rec->state = REGISTERING_STATE;
-				} else {
-					rec->registration_timeout = now + rec->expires - timer_interval;
-					rec->state = INTERNAL_ERROR_STATE;
-				}
-				break;
-			default:
-				LM_ERR("No contact header in received 200ok in state [%d]\n",
-					rec->state);
+		switch(rec->state) {
+		    	case UNREGISTERED_STATE:
+				LM_DBG("Contact unregistered\n");
 				goto done;
-			}
-			break; /* done with 200ok handling */
-		}
-
-		if (rec->flags&FORCE_SINGLE_REGISTRATION) {
-			head_contact = msg->contact;
-			contact = ((contact_body_t*)msg->contact->parsed)->contacts;
-			while (contact) {
-				bindings_counter++;
-				if (contact->next == NULL) {
-					contact = NULL;
-					c_ptr = head_contact->next;
+			default:
+				
+				if (msg->contact) {
+					c_ptr = msg->contact;
 					while(c_ptr) {
 						if (c_ptr->type == HDR_CONTACT_T) {
-							head_contact = c_ptr;
-							contact = ((contact_body_t*)c_ptr->parsed)->contacts;
-							break;
+							if (!c_ptr->parsed && (parse_contact(c_ptr)<0)) {
+								LM_ERR("failed to parse Contact body\n");
+								goto done;
+							}
 						}
 						c_ptr = c_ptr->next;
 					}
 				} else {
-					contact = contact->next;
-				}
-			}
-			if (bindings_counter>1) {
-				LM_DBG("got [%d] bindings\n", bindings_counter);
-				if(send_unregister(cb_param->hash_index, rec, NULL)==1) {
-					rec->state = UNREGISTERING_STATE;
-				} else {
-					rec->state = INTERNAL_ERROR_STATE;
-				}
-				break;
-			}
-		}
-
-		head_contact = msg->contact;
-		contact = ((contact_body_t*)msg->contact->parsed)->contacts;
-		while (contact) {
-			/* Check for binding */
-			if (contact->uri.len==rec->contact_uri.len &&
-				strncmp(contact->uri.s,rec->contact_uri.s,contact->uri.len)==0){
-				if (contact->expires && contact->expires->body.len) {
-					if (str2int(&contact->expires->body, &exp)<0) {
-						LM_ERR("Unable to extract expires from [%.*s]"
-							" for binding [%.*s]\n",
-							contact->expires->body.len,
-							contact->expires->body.s,
-							contact->uri.len, contact->uri.s);
+					switch(rec->state) {							
+					case UNREGISTERING_STATE:
+					case AUTHENTICATING_UNREGISTER_STATE:
+						if(send_register(cb_param->hash_index, rec, NULL)==1) {
+							rec->last_register_sent = now;
+							rec->state = REGISTERING_STATE;
+						} else {
+							rec->registration_timeout = now + rec->expires - timer_interval;
+							rec->state = INTERNAL_ERROR_STATE;
+						}
+						break;
+					default:
+						LM_ERR("No contact header in received 200ok in state [%d]\n",
+							rec->state);
+						goto done;
 					}
+					break; /* done with 200ok handling */
 				}
-				break;
-			}
 
-			/* get the next contact */
-			if (contact->next == NULL) {
-				contact = NULL;
-				c_ptr = head_contact->next;
-				while(c_ptr) {
-					if (c_ptr->type == HDR_CONTACT_T) {
-						head_contact = c_ptr;
-						contact = ((contact_body_t*)c_ptr->parsed)->contacts;
+				if (rec->flags&FORCE_SINGLE_REGISTRATION) {
+					head_contact = msg->contact;
+					contact = ((contact_body_t*)msg->contact->parsed)->contacts;
+					while (contact) {
+						bindings_counter++;
+						if (contact->next == NULL) {
+							contact = NULL;
+							c_ptr = head_contact->next;
+							while(c_ptr) {
+								if (c_ptr->type == HDR_CONTACT_T) {
+									head_contact = c_ptr;
+									contact = ((contact_body_t*)c_ptr->parsed)->contacts;
+									break;
+								}
+								c_ptr = c_ptr->next;
+							}
+						} else {
+							contact = contact->next;
+						}
+					}
+					if (bindings_counter>1) {
+						LM_DBG("got [%d] bindings\n", bindings_counter);
+						if(send_unregister(cb_param->hash_index, rec, NULL)==1) {
+							rec->state = UNREGISTERING_STATE;
+						} else {
+							rec->state = INTERNAL_ERROR_STATE;
+						}
 						break;
 					}
-					c_ptr = c_ptr->next;
 				}
-			} else {
-				contact = contact->next;
-			}
-		}
-		rec->state = REGISTERED_STATE;
-		if (exp) rec->expires = exp;
-		if (rec->expires <= timer_interval) {
-			LM_ERR("Please decrease timer_interval=[%u]"
-				" - imposed server expires [%u] to small for AOR=[%.*s]\n",
-				timer_interval, rec->expires,
-				rec->td.rem_uri.len, rec->td.rem_uri.s);
-		}
-		rec->registration_timeout = now + rec->expires - timer_interval;
-		break;
+
+				head_contact = msg->contact;
+				contact = ((contact_body_t*)msg->contact->parsed)->contacts;
+				while (contact) {
+					/* Check for binding */
+					if (contact->uri.len==rec->contact_uri.len &&
+						strncmp(contact->uri.s,rec->contact_uri.s,contact->uri.len)==0){
+						if (contact->expires && contact->expires->body.len) {
+							if (str2int(&contact->expires->body, &exp)<0) {
+								LM_ERR("Unable to extract expires from [%.*s]"
+									" for binding [%.*s]\n",
+									contact->expires->body.len,
+									contact->expires->body.s,
+									contact->uri.len, contact->uri.s);
+							}
+						}
+						break;
+					}
+
+					/* get the next contact */
+					if (contact->next == NULL) {
+						contact = NULL;
+						c_ptr = head_contact->next;
+						while(c_ptr) {
+							if (c_ptr->type == HDR_CONTACT_T) {
+								head_contact = c_ptr;
+								contact = ((contact_body_t*)c_ptr->parsed)->contacts;
+								break;
+							}
+							c_ptr = c_ptr->next;
+						}
+					} else {
+						contact = contact->next;
+					}
+				}
+				rec->state = REGISTERED_STATE;
+				if (exp) rec->expires = exp;
+				if (rec->expires <= timer_interval) {
+					LM_ERR("Please decrease timer_interval=[%u]"
+						" - imposed server expires [%u] to small for AOR=[%.*s]\n",
+						timer_interval, rec->expires,
+						rec->td.rem_uri.len, rec->td.rem_uri.s);
+				}
+				rec->registration_timeout = now + rec->expires - timer_interval;
+				break;
+		 }
 
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
