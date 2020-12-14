@@ -731,9 +731,9 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 
 int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
-	int result;
+	int result,expires_len;
 	reg_tm_cb_t *cb_param;
-	char *p;
+	char *p;*expires;
 
 	/* Allocate space for tm callback params */
 	cb_param = shm_malloc(sizeof(reg_tm_cb_t));
@@ -743,7 +743,8 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	}
 	cb_param->hash_index = hash_index;
 	cb_param->uac = rec;
-
+        /* get the string version of expires */
+	expires = int2str((unsigned long)(rec->expires), &expires_len);
 	p = extra_hdrs.s;
 	memcpy(p, contact_hdr.s, contact_hdr.len);
 	p += contact_hdr.len;
