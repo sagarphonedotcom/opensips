@@ -356,7 +356,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			goto done;
 		}
 			if(rec->expires==0){
-				LM_DBG("Contact unregistered successfully %s\n",rec->contact_uri);
+				LM_DBG("Contact unregistered successfully [%s]\n",rec->contact_uri);
 				rec->state = UNREGISTERED_STATE;
 				break;
 			}
@@ -1106,7 +1106,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 	reg_record_t *new_rec = (reg_record_t*)data;
 
 	if ((old_rec->state == REGISTERED_STATE) &&
-	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->td.contact_uri, &new_rec->td.contact_uri) == 0)) {
+	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri.s, &new_rec->contact_uri.s) == 0)) {
 		memcpy(new_rec->td.id.call_id.s, old_rec->td.id.call_id.s,
 		    new_rec->td.id.call_id.len);
 		memcpy(new_rec->td.id.loc_tag.s, old_rec->td.id.loc_tag.s,
