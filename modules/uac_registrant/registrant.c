@@ -1026,6 +1026,10 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 
 	switch(rec->td.forced_to_su.s.sa_family) {
 	case AF_UNSPEC:
+		if(!zstr(rec->dest_ip.s)){
+			if (add_mi_string(record_item, MI_SSTR("ip"), rec->dest_ip.s,rec->dest_ip.len) < 0)
+			goto error;
+		}
 		break;
 	case AF_INET:
 	case AF_INET6:
@@ -1036,6 +1040,8 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 		p = ip_addr2a(&addr);
 		if (p == NULL) goto error;
 		len = strlen(p);
+		rec->dest_ip.s=p;
+		rec->dest_ip.len=len;
 		if (add_mi_string(record_item, MI_SSTR("ip"), p, len) < 0)
 			goto error;
 		break;
@@ -1111,8 +1117,6 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 		    new_rec->td.id.call_id.len);
 		memcpy(new_rec->td.id.loc_tag.s, old_rec->td.id.loc_tag.s,
 		    new_rec->td.id.loc_tag.len);
-		memcpy(new_rec->td.forced_to_su.s, old_rec->td.forced_to_su.s,
-		    new_rec->td.forced_to_su.len);
 		new_rec->td.loc_seq.value = old_rec->td.loc_seq.value;
 		new_rec->last_register_sent = old_rec->last_register_sent;
 		new_rec->registration_timeout = old_rec->registration_timeout;
