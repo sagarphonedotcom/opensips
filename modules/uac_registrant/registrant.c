@@ -1025,7 +1025,7 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 
 	switch(rec->td.forced_to_su.s.sa_family) {
 	case AF_UNSPEC:
-		if(!zstr(rec->dest_ip.s)){
+		if(rec->dest_ip.s){
 			if (add_mi_string(record_item, MI_SSTR("ip"), rec->dest_ip.s,rec->dest_ip.len) < 0)
 			goto error;
 		}
