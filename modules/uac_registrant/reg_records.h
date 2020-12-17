@@ -84,6 +84,7 @@ typedef struct reg_record {
 	time_t last_register_sent;
 	time_t registration_timeout;
 	str cluster_shtag;
+	str dest_ip;
 	int cluster_id;
 	unsigned int flags;
 	struct reg_record *prev;
