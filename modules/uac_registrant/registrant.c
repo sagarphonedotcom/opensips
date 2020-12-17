@@ -1120,6 +1120,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 		new_rec->td.loc_seq.value = old_rec->td.loc_seq.value;
 		new_rec->last_register_sent = old_rec->last_register_sent;
 		new_rec->registration_timeout = old_rec->registration_timeout;
+		new_rec->dest_ip = old_rec->dest_ip;
 		if(new_rec->expires==0){
 			new_rec->state = NOT_REGISTERED_STATE;
 			new_rec->registration_timeout = old_rec->last_register_sent;
