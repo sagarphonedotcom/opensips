@@ -390,6 +390,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 					}
 					break; /* done with 200ok handling */
 				}
+			
+				
 
 				if (rec->flags&FORCE_SINGLE_REGISTRATION) {
 					head_contact = msg->contact;
@@ -420,6 +422,11 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						}
 						break;
 					}
+				}
+			
+				if(strncmp(rec->server_expiry.s,"false",rec->server_expiry.s)==0){
+					LM_ERR("We will not respect expires from server side because it is disabled for aor [%.*s] ",rec->td.rem_uri.len, rec->td.rem_uri.s);
+					goto setexpires;
 				}
 
 				head_contact = msg->contact;
