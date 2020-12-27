@@ -401,7 +401,7 @@ int load_reg_info_from_db(unsigned int plist)
 			LM_DBG("registrar=[%.*s] AOR=[%.*s] auth_user=[%.*s] "
 				"password=[%.*s] expire=[%d] proxy=[%.*s] "
 				"contact=[%.*s] third_party=[%.*s] "
-				"cluster_shtag=[%.*s/%d] server_expiry=[%.s] \n",
+				"cluster_shtag=[%.*s/%d] server_expiry=[%.*s] \n",
 				uac_param.registrar_uri.len, uac_param.registrar_uri.s,
 				uac_param.to_uri.len, uac_param.to_uri.s,
 				uac_param.auth_user.len, uac_param.auth_user.s,
