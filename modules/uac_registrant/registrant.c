@@ -384,9 +384,9 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						}
 						break;
 					default:
-						LM_ERR("No contact header in received 200ok in state [%d]\n",
+						LM_DBG("No contact header in received 200ok in state [%d] So we will not extract expires from contact header\n",
 							rec->state);
-						goto done;
+						goto setexpires;
 					}
 					break; /* done with 200ok handling */
 				}
@@ -456,6 +456,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						contact = contact->next;
 					}
 				}
+			setexpires:
 				rec->state = REGISTERED_STATE;
 				if (exp) rec->expires = exp;
 				if (rec->expires <= timer_interval) {
