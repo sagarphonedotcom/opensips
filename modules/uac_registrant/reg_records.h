@@ -62,6 +62,7 @@ typedef struct uac_reg_map {
 	str contact_params;		/* contact params */
 	str auth_user;			/* authentication user */
 	str auth_password;		/* authentication password */
+	str server_expiry;		/* server expiry */
 	unsigned int expires;		/* expiration interval */
 	struct socket_info *send_sock;	/* socket */
 	str cluster_shtag;	/* clustering sharing tag */
@@ -85,6 +86,7 @@ typedef struct reg_record {
 	time_t registration_timeout;
 	str cluster_shtag;
 	str dest_ip;
+	str server_expiry;
 	int cluster_id;
 	unsigned int flags;
 	struct reg_record *prev;
