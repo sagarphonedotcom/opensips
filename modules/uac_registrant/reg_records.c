@@ -134,7 +134,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 		uac->to_uri.len + uac->from_uri.len + uac->registrar_uri.len +
 		uac->auth_user.len + uac->auth_password.len +
 		uac->contact_uri.len + uac->contact_params.len + uac->proxy_uri.len +
-		uac->cluster_shtag.len + uac->server_expiry.len;
+		uac->cluster_shtag.len + uac->server_expiry.len + uac->proxy_uri.len ;
 
 	if(plist==0) list = reg_htable[uac->hash_code].p_list;
 	else list = reg_htable[uac->hash_code].s_list;
@@ -228,6 +228,13 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 		record->server_expiry.len = uac->server_expiry.len;
 		memcpy(p, uac->server_expiry.s, uac->server_expiry.len);
 		p += uac->server_expiry.len;
+	}
+	
+	if (uac->proxy_uri.s && uac->proxy_uri.len) {
+		record->proxy_uri.s = p;
+		record->proxy_uri.len = uac->proxy_uri.len;
+		memcpy(p, uac->proxy_uri.s, uac->proxy_uri.len);
+		p += uac->proxy_uri.len;
 	}
 
 	if (uac->auth_password.s && uac->auth_password.len) {
