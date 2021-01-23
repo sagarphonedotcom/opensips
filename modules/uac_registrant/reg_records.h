@@ -67,6 +67,7 @@ typedef struct uac_reg_map {
 	struct socket_info *send_sock;	/* socket */
 	str cluster_shtag;	/* clustering sharing tag */
 	int cluster_id;
+	int failed_attempts; // Counter for failed attempts since last reload - sagar
 	unsigned int flags;	/* record flags */
 	struct uac_reg_map *next;
 } uac_reg_map_t;
