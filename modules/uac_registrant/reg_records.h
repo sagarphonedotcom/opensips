@@ -87,6 +87,7 @@ typedef struct reg_record {
 	str cluster_shtag;
 	str dest_ip;
 	str server_expiry;
+	str proxy_uri; // Proxy URI
 	int cluster_id;
 	int failed_attempts; // Counter for failed attempts since last reload - sagar
 	unsigned int flags;
