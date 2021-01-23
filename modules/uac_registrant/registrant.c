@@ -836,7 +836,13 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	case REGISTER_TIMEOUT_STATE:
 	case INTERNAL_ERROR_STATE:
 	case REGISTRAR_ERROR_STATE:
+		
 		reg_print_record(rec);
+		rec->failed_attempts++;
+		if(rec->failed_attempts > 4){
+			LM_ERR("Max failed attempts exceeded for rec [%p]\n", rec);
+			break;
+		}
 		new_call_id_ftag_4_record(rec, s_now);
 		if(send_register(i, rec, NULL)==1) {
 			rec->last_register_sent = now;
@@ -852,6 +858,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 			break;
 		}
 	case NOT_REGISTERED_STATE:
+		rec->failed_attempts=0;
 		if(rec->expires==0){
 			if(send_unregister(i, rec, NULL)==1) {
 				rec->state = UNREGISTERING_STATE;
@@ -1137,6 +1144,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 			new_rec->state = old_rec->state;
 
 		}
+		new_rec->failed_attempts=0; //In case of reg reload, reset failed attempts
 	}
 	return 0;
 }
