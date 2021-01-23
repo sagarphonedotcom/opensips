@@ -1126,7 +1126,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 	reg_record_t *new_rec = (reg_record_t*)data;
 
 	if ((old_rec->state == REGISTERED_STATE) &&
-	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri, &new_rec->contact_uri) == 0) && (str_strcmp(&old_rec->server_expiry, &new_rec->server_expiry) == 0) && (new_rec->expires!=old_rec->expires)) {
+	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri, &new_rec->contact_uri) == 0) && (str_strcmp(&old_rec->proxy_uri, &new_rec->proxy_uri) == 0) && (str_strcmp(&old_rec->server_expiry, &new_rec->server_expiry) == 0) && (new_rec->expires!=old_rec->expires)) {
 		memcpy(new_rec->td.id.call_id.s, old_rec->td.id.call_id.s,
 		    new_rec->td.id.call_id.len);
 		memcpy(new_rec->td.id.loc_tag.s, old_rec->td.id.loc_tag.s,
