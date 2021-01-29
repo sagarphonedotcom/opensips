@@ -1027,10 +1027,10 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 		if (add_mi_string(record_item, MI_SSTR("binding_params"),
 			rec->contact_params.s, rec->contact_params.len) < 0)
 			goto error;
-
-	if(rec->td.loc_uri.s != rec->td.rem_uri.s)
+//Always print third party registrant value 
+	if(rec->third_party_registrant.s && rec->third_party_registrant.len)
 		if (add_mi_string(record_item, MI_SSTR("third_party_registrant"),
-			rec->td.loc_uri.s, rec->td.loc_uri.len) < 0)
+			rec->third_party_registrant.s, rec->third_party_registrant.len) < 0)
 			goto error;
 
 	if (rec->td.obp.s && rec->td.obp.len)
