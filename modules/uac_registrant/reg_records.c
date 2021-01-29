@@ -134,7 +134,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 		uac->to_uri.len + uac->from_uri.len + uac->registrar_uri.len +
 		uac->auth_user.len + uac->auth_password.len +
 		uac->contact_uri.len + uac->contact_params.len + uac->proxy_uri.len +
-		uac->cluster_shtag.len + uac->server_expiry.len + uac->proxy_uri.len ;
+		uac->cluster_shtag.len + uac->server_expiry.len + uac->proxy_uri.len + uac->third_party_registrant.len;
 
 	if(plist==0) list = reg_htable[uac->hash_code].p_list;
 	else list = reg_htable[uac->hash_code].s_list;
@@ -183,16 +183,31 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 		p += uac->proxy_uri.len;
 	}
 
+	/////////////////////Always take from URI from aor and not from third party registrant////////////////////
 	/* Setting the local URI */
-	if(uac->from_uri.s && uac->from_uri.len) {
+	/*if(uac->from_uri.s && uac->from_uri.len) {
 		LM_DBG("got from [%.*s]\n", uac->from_uri.len, uac->from_uri.s);
 		td->loc_uri.s = p;
 		td->loc_uri.len = uac->from_uri.len;
 		memcpy(p, uac->from_uri.s, uac->from_uri.len);
 		p += uac->from_uri.len;
 	} else {
+		*/
 		td->loc_uri.s = td->rem_uri.s;
 		td->loc_uri.len = td->rem_uri.len;
+	//}
+	////////////////////////////////////////
+	
+	/* Setting third party registrant from database */
+	if(uac->from_uri.s && uac->from_uri.len) {
+		LM_DBG("got from [%.*s]\n", uac->from_uri.len, uac->from_uri.s);
+		record->third_party_registrant.s = p;
+		record->third_party_registrant.len = uac->from_uri.len;
+		memcpy(p, uac->from_uri.s, uac->from_uri.len);
+		p += uac->from_uri.len;
+	} else {
+		record->third_party_registrant.s = td->rem_uri.s;
+		record->third_party_registrant.len = td->rem_uri.len;
 	}
 
 	/* Setting the Remote target URI */
