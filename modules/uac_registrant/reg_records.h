@@ -85,6 +85,7 @@ typedef struct reg_record {
 	time_t last_register_sent;
 	time_t registration_timeout;
 	str cluster_shtag;
+	str third_party_registrant; // To print third party registrant on reg list
 	str dest_ip;
 	str server_expiry;
 	str proxy_uri; // Proxy URI
