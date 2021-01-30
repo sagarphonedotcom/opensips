@@ -473,6 +473,10 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						rec->td.rem_uri.len, rec->td.rem_uri.s);
 				}
 				rec->registration_timeout = now + rec->expires - timer_interval;
+				LM_ERR("REMOTE TAG : Please decrease timer_interval=[%u]"
+						" - imposed server expires [%u] to remote tag=[%.*s]\n",
+						timer_interval, rec->expires,
+						rec->td.id..rem_tag.len, rec->td.id.rem_tag.s);
 				break;
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
