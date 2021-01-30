@@ -324,6 +324,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	struct tmcb_params *ps;
 	time_t now;
 	reg_tm_cb_t *cb_param;
+	char *p;
 
 	cb_param = tm_cback_data->cb_param;
 	if (rec!=cb_param->uac) {
@@ -581,10 +582,12 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			goto done;
 		}
 		//memcpy(rec->auth_hdr.s,new_hdr->s,new_hdr->len);
-		rec->auth_hdr->s=new_hdr->s;
-		rec->auth_hdr->len=new_hdr->len;
+		memcpy(p, new_hdr->s,new_hdr->len);
+
+		rec->auth_hdr.s=p;
+		rec->auth_hdr.len=new_hdr->len;
 		LM_ERR("Auth Header value [%.*s]\n",
-				rec->auth_hdr->len, rec->auth_hdr->len);
+				rec->auth_hdr.len, rec->auth_hdr.s);
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -853,6 +856,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	str *s_now = t_check_data->s_now;
 	unsigned int i = t_check_data->hash_counter;
         str *new_hdr;
+	char *p;
 //     new_hdr->s = NULL; new_hdr->len = 0;
 
 
@@ -893,10 +897,11 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 			break;
 		}
 			LM_ERR("Auth Header value [%.*s]\n",
-				rec->auth_hdr->len, rec->auth_hdr->len);
-		new_hdr->s = (char *)pkg_malloc(rec->auth_hdr->len);
- 		memcpy(new_hdr->s,rec->auth_hdr->s,rec->auth_hdr->len);
-	         new_hdr->len=rec->auth_hdr->len;
+				rec->auth_hdr.len, rec->auth_hdr.s);
+		p = (char *)pkg_malloc(rec->auth_hdr.len);
+ 		memcpy(p,rec->auth_hdr.s,rec->auth_hdr.len);
+	         new_hdr->len=rec->auth_hdr.len;
+		 new_hdr->p=rec->auth_hdr.s;
 		if(send_register(i, rec, new_hdr)==1) {
 				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
