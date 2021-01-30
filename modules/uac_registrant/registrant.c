@@ -889,7 +889,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-		new_hdr.s = (char *)pkg_malloc(rec->auth_hdr.len);
+		new_hdr->s = (char *)pkg_malloc(rec->auth_hdr.len);
  		memcpy(new_hdr->s,rec->auth_hdr.s,rec->auth_hdr.len);
 	         new_hdr->len=rec->auth_hdr.len;
 		if(send_register(i, rec, new_hdr)==1) {
