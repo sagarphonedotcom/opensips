@@ -662,8 +662,8 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 
 	/* Initialize slinkedl run traversal data */
 	tm_cback_data.t = t;
-    tm_cback_data.ps = ps;
-    tm_cback_data.cb_param = cb_param;
+        tm_cback_data.ps = ps;
+        tm_cback_data.cb_param = cb_param;
 	tm_cback_data.now = now;
 
 	lock_get(&reg_htable[cb_param->hash_index].lock);
@@ -722,7 +722,8 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
-		rec->auth_hdr.s=p;
+		//rec->auth_hdr.s=p;
+		memcpy(rec->auth_hdr.s, p, auth_hdr->len);
 		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
 	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
