@@ -95,7 +95,7 @@ typedef struct reg_record {
 	str auth_qop;
 	str auth_realm;
 	str auth_nounce;
-	str auth_flags
+	int auth_flags
 	str auth_domain;
 	str auth_opaque;
 	//////////////////////////////
