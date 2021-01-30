@@ -93,6 +93,7 @@ static mi_response_t *mi_reg_reload(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
 int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
+int send_reregister(unsigned int hash_index, reg_record_t *rec);
 
 
 /** Global variables */
@@ -473,8 +474,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						rec->td.rem_uri.len, rec->td.rem_uri.s);
 				}
 				rec->registration_timeout = now + rec->expires - timer_interval;
-				td->id.rem_tag.s = "trago";
-				td->id.rem_tag.len = 5;
+                rec->td.id.rem_tag.s = "trago";
+				rec->td.id.rem_tag.len = 5;
 				LM_ERR("REMOTE TAG : Please decrease timer_interval=[%u]"
 						" - imposed server expires [%u] to remote tag=[%.*s]\n",
 						timer_interval, rec->expires,
@@ -514,7 +515,30 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			auth->nonce.len, auth->nonce.s,
 			auth->opaque.len, auth->opaque.s,
 			auth->qop.len, auth->qop.s);
-
+            
+//         rec->auth_flags=auth->flags;
+//         rec->auth_realm.s=auth->realm.s;
+//         rec->auth_realm.len=auth->realm.len;
+//         rec->auth_qop.s=auth->qop.s;
+//         rec->auth_qop.len=auth->qop.len;
+//         rec->auth_domain.s=auth->domain.s;
+//         rec->auth_domain.len=auth->domain.len;
+//         rec->auth_nounce.s=auth->nounce.s;
+//         rec->auth_nounce.len=auth->nounce.len;
+//         rec->auth_opaque.s=auth->opaque.s;
+//         rec->auth_opaque.len=auth->opaque.len;
+//         
+//         
+// LM_DBG("From Rec record : flags=[%d] realm=[%.*s] domain=[%.*s] nonce=[%.*s]"
+// 			" opaque=[%.*s] qop=[%.*s]\n",
+// 			rec->auth_flags,
+// 			rec->auth_realm.len, rec->auth_realm.s,
+// 			rec->auth_domain.len, rec->auth_domain.s,
+// 			rec->auth_nonce.len, rec->auth_nonce.s,
+// 			rec->auth_opaque.len, rec->auth_opaque.s,
+// 			rec->auth_qop.len, rec->auth_qop.s);
+        
+        
 		switch(rec->state) {
 		case REGISTERING_STATE:
 		case UNREGISTERING_STATE:
@@ -558,6 +582,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
+		rec->auth_domain.s=new_hdr.s;
+		rec->auth_domain.len=new_hdr.len;
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -676,6 +702,23 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 }
 
 
+int send_reregister(unsigned int hash_index, reg_record_t *rec)
+{
+ 		if (!rec->auth_domain) {
+			LM_ERR("failed to build authorization hdr\n");
+			goto done;
+		}
+		if(send_register(cb_param->hash_index, rec, rec->auth_domain)==1) {
+				rec->state = AUTHENTICATING_STATE;
+        } else {
+				rec->state = INTERNAL_ERROR_STATE;
+        }
+			
+    done:
+    rec->state = INTERNAL_ERROR_STATE;
+	rec->registration_timeout = now + rec->expires;
+	return -1; /* exit list traversal */
+}
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
 	int result, expires_len;
@@ -863,6 +906,12 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
+		if(send_reregister(i, rec)==1) {
+				rec->state = REGISTERING_STATE;
+			} else {
+				rec->state = INTERNAL_ERROR_STATE;
+			}
+        break;
 	case NOT_REGISTERED_STATE:
 		rec->failed_attempts=0;
 		if(rec->expires==0){
@@ -1213,4 +1262,3 @@ error:
 	}
 	return NULL;
 }
-
