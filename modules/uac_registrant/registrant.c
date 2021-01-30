@@ -722,8 +722,8 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
+		memcpy(rec->auth_hdr.s, auth_hdr->s, auth_hdr->len);
 		//rec->auth_hdr.s=p;
-		memcpy(rec->auth_hdr.s, p, auth_hdr->len);
 		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
 	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
