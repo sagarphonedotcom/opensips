@@ -580,7 +580,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-		rec->auth_hdr->s=new_hdr->s;
+		memcpy(rec->auth_hdr->s,new_hdr->s,new_hdr->len)
 		rec->auth_hdr->len=new_hdr->len;
 		switch(rec->state) {
 		case REGISTERING_STATE:
