@@ -472,12 +472,13 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						rec->td.rem_uri.len, rec->td.rem_uri.s);
 				}
 				rec->registration_timeout = now + rec->expires - timer_interval;
-                rec->td.id.rem_tag.s = "trago";
+               /* rec->td.id.rem_tag.s = "trago";
 				rec->td.id.rem_tag.len = 5;
 				LM_ERR("REMOTE TAG : Please decrease timer_interval=[%u]"
 						" - imposed server expires [%u] to remote tag=[%.*s]\n",
 						timer_interval, rec->expires,
 						rec->td.id.rem_tag.len, rec->td.id.rem_tag.s);
+						*/
 				break;
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
@@ -722,7 +723,7 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
 		rec->auth_hdr.s=p;
-		rec->auth_hdr.len=strlen(p);
+		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
 	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
 		memcpy(p, rec->auth_hdr.s, rec->auth_hdr.len);
