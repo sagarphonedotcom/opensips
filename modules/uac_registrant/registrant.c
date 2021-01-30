@@ -580,8 +580,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-		rec->auth_hdr.s=new_hdr->s;
-		rec->auth_hdr.len=new_hdr->len;
+		rec->auth_hdr->s=new_hdr->s;
+		rec->auth_hdr->len=new_hdr->len;
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -892,7 +892,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 // 		memcpy(new_hdr->s,rec->auth_hdr.s,rec->auth_hdr.len);
 //          new_hdr=rec->auth_hdr;
 //         new_hdr->len=rec->auth_hdr.len;
-		if(send_register(i, rec, &rec->auth_hdr)==1) {
+		if(send_register(i, rec, rec->auth_hdr)==1) {
 				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
 			} else {
