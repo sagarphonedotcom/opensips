@@ -92,12 +92,7 @@ typedef struct reg_record {
 	int cluster_id;
 	int failed_attempts; // Counter for failed attempts since last reload - sagar
 	//added auth header param in reg record
-	str auth_qop;
-	str auth_realm;
-	str auth_nounce;
-	int auth_flags
-	str auth_domain;
-	str auth_opaque;
+	str auth_hdr;
 	//////////////////////////////
 	unsigned int flags;
 	struct reg_record *prev;
