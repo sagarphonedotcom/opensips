@@ -185,17 +185,17 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 
 	/////////////////////Always take from URI from aor and not from third party registrant////////////////////
 	/* Setting the local URI */
-	/*if(uac->from_uri.s && uac->from_uri.len) {
-		LM_DBG("got from [%.*s]\n", uac->from_uri.len, uac->from_uri.s);
+	if(td->rem_uri.s && td->rem_uri.len) {
+		LM_DBG("got from [%.*s]\n", td->rem_uri.len, td->rem_uri.s);
 		td->loc_uri.s = p;
-		td->loc_uri.len = uac->from_uri.len;
-		memcpy(p, uac->from_uri.s, uac->from_uri.len);
-		p += uac->from_uri.len;
+		td->loc_uri.len = td->rem_uri.len;
+		memcpy(p, td->rem_uri.s, td->rem_uri.len);
+		p += td->rem_uri.len;
 	} else {
-		*/
+		
 		td->loc_uri.s = td->rem_uri.s;
 		td->loc_uri.len = td->rem_uri.len;
-	//}
+	}
 	////////////////////////////////////////
 	
 	/* Setting third party registrant from database */
