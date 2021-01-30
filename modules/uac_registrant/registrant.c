@@ -521,8 +521,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 //         rec->auth_realm.len=auth->realm.len;
 //         rec->auth_qop.s=auth->qop.s;
 //         rec->auth_qop.len=auth->qop.len;
-//         rec->auth_domain.s=auth->domain.s;
-//         rec->auth_domain.len=auth->domain.len;
+//         rec->auth_hdr.s=auth->domain.s;
+//         rec->auth_hdr.len=auth->domain.len;
 //         rec->auth_nounce.s=auth->nounce.s;
 //         rec->auth_nounce.len=auth->nounce.len;
 //         rec->auth_opaque.s=auth->opaque.s;
@@ -533,7 +533,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 // 			" opaque=[%.*s] qop=[%.*s]\n",
 // 			rec->auth_flags,
 // 			rec->auth_realm.len, rec->auth_realm.s,
-// 			rec->auth_domain.len, rec->auth_domain.s,
+// 			rec->auth_hdr.len, rec->auth_hdr.s,
 // 			rec->auth_nonce.len, rec->auth_nonce.s,
 // 			rec->auth_opaque.len, rec->auth_opaque.s,
 // 			rec->auth_qop.len, rec->auth_qop.s);
@@ -582,8 +582,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-		rec->auth_domain.s=new_hdr.s;
-		rec->auth_domain.len=new_hdr.len;
+		rec->auth_hdr.s=new_hdr.s;
+		rec->auth_hdr.len=new_hdr.len;
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -704,20 +704,22 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 
 int send_reregister(unsigned int hash_index, reg_record_t *rec)
 {
- 		if (!rec->auth_domain) {
+        int result=1;
+ 		if (!rec->auth_hdr) {
 			LM_ERR("failed to build authorization hdr\n");
+            result=0;
 			goto done;
 		}
-		if(send_register(cb_param->hash_index, rec, rec->auth_domain)==1) {
-				rec->state = AUTHENTICATING_STATE;
+		if(send_register(cb_param->hash_index, rec, rec->auth_hdr)==1) {
+				rec->state = REGISTERING_STATE;
         } else {
 				rec->state = INTERNAL_ERROR_STATE;
         }
-			
+
     done:
     rec->state = INTERNAL_ERROR_STATE;
 	rec->registration_timeout = now + rec->expires;
-	return -1; /* exit list traversal */
+	return result; /* exit list traversal */
 }
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
