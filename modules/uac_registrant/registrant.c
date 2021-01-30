@@ -684,6 +684,8 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	int result, expires_len;
 	reg_tm_cb_t *cb_param;
 	char *p, *expires;
+	char extra_hdrs_buf[512];
+	static str extra_hdrs={extra_hdrs_buf, 512};
 
 	/* Allocate space for tm callback params */
 	cb_param = shm_malloc(sizeof(reg_tm_cb_t));
