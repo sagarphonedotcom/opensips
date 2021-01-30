@@ -324,7 +324,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	struct tmcb_params *ps;
 	time_t now;
 	reg_tm_cb_t *cb_param;
-	char *p;
+	//char *p;
 
 	cb_param = tm_cback_data->cb_param;
 	if (rec!=cb_param->uac) {
@@ -587,7 +587,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 		//rec->auth_hdr.s=p;
 		//rec->auth_hdr.len=new_hdr->len;
 		LM_ERR("Auth Header value [%.*s]\n",
-				new_hdr.len, new_hdr.s);
+				new_hdr->len, new_hdr->s);
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
