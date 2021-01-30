@@ -719,12 +719,11 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	memcpy(p, expires, expires_len);
 	p += expires_len;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-
+LM_DBG("Before Auth header [%.*s]\n",
+		rec->auth_hdr.len,rec->auth_hdr.s);
 	if (auth_hdr) {
-		memcpy(p, auth_hdr->s, auth_hdr->len);
-		strncpy(rec->auth_hdr.s, auth_hdr->s, auth_hdr->len);
-		
-		//rec->auth_hdr.s=p;
+		memcpy(p, auth_hdr->s, auth_hdr->len);		
+		rec->auth_hdr.s=p;
 		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
 	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
