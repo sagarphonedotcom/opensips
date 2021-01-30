@@ -886,7 +886,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-		if(send_register(i, rec, rec.auth_hdr)==1) {
+		if(send_register(i, rec, rec->auth_hdr)==1) {
 				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
 			} else {
