@@ -582,12 +582,12 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			goto done;
 		}
 		//memcpy(rec->auth_hdr.s,new_hdr->s,new_hdr->len);
-		memcpy(p, new_hdr->s,new_hdr->len);
+		//memcpy(p, new_hdr->s,new_hdr->len);
 
-		rec->auth_hdr.s=p;
-		rec->auth_hdr.len=new_hdr->len;
+		//rec->auth_hdr.s=p;
+		//rec->auth_hdr.len=new_hdr->len;
 		LM_ERR("Auth Header value [%.*s]\n",
-				rec->auth_hdr.len, rec->auth_hdr.s);
+				new_hdr.len, new_hdr.s);
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -748,12 +748,14 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
+		rec->auth_hdr.s=p;
+		rec->auth_hdr.len=strlen(p);
 		p += auth_hdr->len;
 	}
 	extra_hdrs.len = (int)(p - extra_hdrs.s);
 
-	LM_DBG("extra_hdrs=[%p][%d]->[%.*s]\n",
-		extra_hdrs.s, extra_hdrs.len, extra_hdrs.len, extra_hdrs.s);
+	LM_DBG("extra_hdrs=[%p][%d]->[%.*s] Auth header [%.*s]\n",
+		extra_hdrs.s, extra_hdrs.len, extra_hdrs.len, extra_hdrs.s,rec->auth_hdr.len,rec->auth_hdr.s);
 
 	result=tmb.t_request_within(
 		&register_method,	/* method */
@@ -855,8 +857,8 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	time_t now = t_check_data->now;
 	str *s_now = t_check_data->s_now;
 	unsigned int i = t_check_data->hash_counter;
-        str *new_hdr;
-	char *p;
+        //str *new_hdr;
+	//char *p;
 //     new_hdr->s = NULL; new_hdr->len = 0;
 
 
@@ -896,7 +898,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-			LM_ERR("Auth Header value [%.*s]\n",
+	/*		LM_ERR("Auth Header value [%.*s]\n",
 				rec->auth_hdr.len, rec->auth_hdr.s);
 		p = (char *)pkg_malloc(rec->auth_hdr.len);
  		memcpy(p,rec->auth_hdr.s,rec->auth_hdr.len);
@@ -910,7 +912,8 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 				rec->state = INTERNAL_ERROR_STATE;
 			}
 pkg_free(new_hdr->s);
-		new_hdr->s = NULL; new_hdr->len = 0;        
+		new_hdr->s = NULL; new_hdr->len = 0;
+		*/
         break;
 	case NOT_REGISTERED_STATE:
 		rec->failed_attempts=0;
