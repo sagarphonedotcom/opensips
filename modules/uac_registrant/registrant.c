@@ -93,8 +93,6 @@ static mi_response_t *mi_reg_reload(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
 int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
-int send_reregister(unsigned int hash_index, reg_record_t *rec);
-
 
 /** Global variables */
 
@@ -582,8 +580,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-		rec->auth_hdr.s=new_hdr.s;
-		rec->auth_hdr.len=new_hdr.len;
+		rec->auth_hdr.s=new_hdr->s;
+		rec->auth_hdr.len=new_hdr->len;
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -701,26 +699,6 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 	return;
 }
 
-
-int send_reregister(unsigned int hash_index, reg_record_t *rec)
-{
-        int result=1;
- 		if (!rec->auth_hdr) {
-			LM_ERR("failed to build authorization hdr\n");
-            result=0;
-			goto done;
-		}
-		if(send_register(cb_param->hash_index, rec, rec->auth_hdr)==1) {
-				rec->state = REGISTERING_STATE;
-        } else {
-				rec->state = INTERNAL_ERROR_STATE;
-        }
-
-    done:
-    rec->state = INTERNAL_ERROR_STATE;
-	rec->registration_timeout = now + rec->expires;
-	return result; /* exit list traversal */
-}
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
 	int result, expires_len;
@@ -908,9 +886,11 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-		if(send_reregister(i, rec)==1) {
+		if(send_register(i, rec, rec->auth_hdr)==1) {
+				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
 			} else {
+				rec->registration_timeout = now + rec->expires - timer_interval;
 				rec->state = INTERNAL_ERROR_STATE;
 			}
         break;
