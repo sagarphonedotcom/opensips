@@ -901,7 +901,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		p = (char *)pkg_malloc(rec->auth_hdr.len);
  		memcpy(p,rec->auth_hdr.s,rec->auth_hdr.len);
 	         new_hdr->len=rec->auth_hdr.len;
-		 new_hdr->p=rec->auth_hdr.s;
+		 new_hdr->s=p;
 		if(send_register(i, rec, new_hdr)==1) {
 				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
