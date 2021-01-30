@@ -91,6 +91,14 @@ typedef struct reg_record {
 	str proxy_uri; // Proxy URI
 	int cluster_id;
 	int failed_attempts; // Counter for failed attempts since last reload - sagar
+	//added auth header param in reg record
+	str auth_qop;
+	str auth_realm;
+	str auth_nounce;
+	str auth_flags
+	str auth_domain;
+	str auth_opaque;
+	//////////////////////////////
 	unsigned int flags;
 	struct reg_record *prev;
 	struct reg_record *next;
