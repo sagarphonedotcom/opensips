@@ -850,6 +850,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	str *s_now = t_check_data->s_now;
 	unsigned int i = t_check_data->hash_counter;
     str *new_hdr;
+    new_hdr->s = NULL; new_hdr->len = 0;
 
 
 	if (!ureg_cluster_shtag_is_active( &rec->cluster_shtag, rec->cluster_id))
@@ -888,8 +889,9 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-        new_hdr->s=rec->auth_hdr.s;
-        new_hdr->len=rec->auth_hdr.len;
+		memcpy(new_hdr->s,rec->auth_hdr.s,rec->auth_hdr.len);
+//         new_hdr->s=rec->auth_hdr.s;
+//         new_hdr->len=rec->auth_hdr.len;
 		if(send_register(i, rec, new_hdr)==1) {
 				rec->last_register_sent = now;
 				rec->state = REGISTERING_STATE;
@@ -897,6 +899,8 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 				rec->registration_timeout = now + rec->expires - timer_interval;
 				rec->state = INTERNAL_ERROR_STATE;
 			}
+        new_hdr->s = NULL; new_hdr->len = 0;
+        
         break;
 	case NOT_REGISTERED_STATE:
 		rec->failed_attempts=0;
