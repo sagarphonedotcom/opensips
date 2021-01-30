@@ -324,7 +324,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	struct tmcb_params *ps;
 	time_t now;
 	reg_tm_cb_t *cb_param;
-	//char *p;
 
 	cb_param = tm_cback_data->cb_param;
 	if (rec!=cb_param->uac) {
@@ -515,27 +514,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			auth->opaque.len, auth->opaque.s,
 			auth->qop.len, auth->qop.s);
             
-//         rec->auth_flags=auth->flags;
-//         rec->auth_realm.s=auth->realm.s;
-//         rec->auth_realm.len=auth->realm.len;
-//         rec->auth_qop.s=auth->qop.s;
-//         rec->auth_qop.len=auth->qop.len;
-//         rec->auth_hdr.s=auth->domain.s;
-//         rec->auth_hdr.len=auth->domain.len;
-//         rec->auth_nounce.s=auth->nounce.s;
-//         rec->auth_nounce.len=auth->nounce.len;
-//         rec->auth_opaque.s=auth->opaque.s;
-//         rec->auth_opaque.len=auth->opaque.len;
-//         
-//         
-// LM_DBG("From Rec record : flags=[%d] realm=[%.*s] domain=[%.*s] nonce=[%.*s]"
-// 			" opaque=[%.*s] qop=[%.*s]\n",
-// 			rec->auth_flags,
-// 			rec->auth_realm.len, rec->auth_realm.s,
-// 			rec->auth_hdr.len, rec->auth_hdr.s,
-// 			rec->auth_nonce.len, rec->auth_nonce.s,
-// 			rec->auth_opaque.len, rec->auth_opaque.s,
-// 			rec->auth_qop.len, rec->auth_qop.s);
+
         
         
 		switch(rec->state) {
@@ -581,13 +560,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-		//memcpy(rec->auth_hdr.s,new_hdr->s,new_hdr->len);
-		//memcpy(p, new_hdr->s,new_hdr->len);
 
-		//rec->auth_hdr.s=p;
-		//rec->auth_hdr.len=new_hdr->len;
-		LM_ERR("Auth Header value [%.*s]\n",
-				new_hdr->len, new_hdr->s);
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -901,23 +874,6 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 		if (now < rec->registration_timeout) {
 			break;
 		}
-	/*		LM_ERR("Auth Header value [%.*s]\n",
-				rec->auth_hdr.len, rec->auth_hdr.s);
-		p = (char *)pkg_malloc(rec->auth_hdr.len);
- 		memcpy(p,rec->auth_hdr.s,rec->auth_hdr.len);
-	         new_hdr->len=rec->auth_hdr.len;
-		 new_hdr->s=p;
-		if(send_register(i, rec, new_hdr)==1) {
-				rec->last_register_sent = now;
-				rec->state = REGISTERING_STATE;
-			} else {
-				rec->registration_timeout = now + rec->expires - timer_interval;
-				rec->state = INTERNAL_ERROR_STATE;
-			}
-pkg_free(new_hdr->s);
-		new_hdr->s = NULL; new_hdr->len = 0;
-		*/
-        break;
 	case NOT_REGISTERED_STATE:
 		rec->failed_attempts=0;
 		if(rec->expires==0){
