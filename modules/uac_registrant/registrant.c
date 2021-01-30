@@ -875,13 +875,13 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 			break;
 		}
 		new_call_id_ftag_4_record(rec, s_now);
-		if(send_register(i, rec, NULL)==1) {
-			rec->last_register_sent = now;
-			rec->state = REGISTERING_STATE;
-		} else {
-			rec->registration_timeout = now + rec->expires - timer_interval;
-			rec->state = INTERNAL_ERROR_STATE;
-		}
+// 		if(send_register(i, rec, NULL)==1) {
+// 			rec->last_register_sent = now;
+// 			rec->state = REGISTERING_STATE;
+// 		} else {
+// 			rec->registration_timeout = now + rec->expires - timer_interval;
+// 			rec->state = INTERNAL_ERROR_STATE;
+// 		}
 		break;
 	case REGISTERED_STATE:
 		/* check if we need to re-register */
