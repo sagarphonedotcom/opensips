@@ -112,7 +112,7 @@ static str expires_hdr = str_init("Expires: ");
 static str expires_param = str_init(";expires=");
 
 char extra_hdrs_buf[512];
-//static str extra_hdrs={extra_hdrs_buf, 512};
+static str extra_hdrs={extra_hdrs_buf, 512};
 
 
 /* TM bind */
@@ -472,13 +472,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 						rec->td.rem_uri.len, rec->td.rem_uri.s);
 				}
 				rec->registration_timeout = now + rec->expires - timer_interval;
-               /* rec->td.id.rem_tag.s = "trago";
-				rec->td.id.rem_tag.len = 5;
-				LM_ERR("REMOTE TAG : Please decrease timer_interval=[%u]"
-						" - imposed server expires [%u] to remote tag=[%.*s]\n",
-						timer_interval, rec->expires,
-						rec->td.id.rem_tag.len, rec->td.id.rem_tag.s);
-						*/
 				break;
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
@@ -684,8 +677,6 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	int result, expires_len;
 	reg_tm_cb_t *cb_param;
 	char *p, *expires;
-	char *auth_hdr_tmp;
-	static str extra_hdrs={extra_hdrs_buf, 512};
 
 	/* Allocate space for tm callback params */
 	cb_param = shm_malloc(sizeof(reg_tm_cb_t));
@@ -721,23 +712,15 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	memcpy(p, expires, expires_len);
 	p += expires_len;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-LM_DBG("Before Auth header [%.*s]\n",
-		rec->auth_hdr.len,rec->auth_hdr.s);
+
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);	
-		auth_hdr_tmp=rec->auth_hdr.s;
-		memcpy(auth_hdr_tmp, auth_hdr->s, auth_hdr->len);	
-		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
-		auth_hdr_tmp+=auth_hdr->len;
-	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
-		memcpy(p, rec->auth_hdr.s, rec->auth_hdr.len);
-		p += rec->auth_hdr.len;
-	}
+	} 
 	extra_hdrs.len = (int)(p - extra_hdrs.s);
 
-	LM_DBG("extra_hdrs=[%p][%d]->[%.*s] Auth header [%.*s]\n",
-		extra_hdrs.s, extra_hdrs.len, extra_hdrs.len, extra_hdrs.s,rec->auth_hdr.len,rec->auth_hdr.s);
+	LM_DBG("extra_hdrs=[%p][%d]->[%.*s]\n",
+		extra_hdrs.s, extra_hdrs.len, extra_hdrs.len, extra_hdrs.s);
 
 	result=tmb.t_request_within(
 		&register_method,	/* method */
@@ -760,7 +743,6 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	int result,expires_len;
 	reg_tm_cb_t *cb_param;
 	char *p,*expires;
-	static str extra_hdrs={extra_hdrs_buf, 512};
 
 	/* Allocate space for tm callback params */
 	cb_param = shm_malloc(sizeof(reg_tm_cb_t));
