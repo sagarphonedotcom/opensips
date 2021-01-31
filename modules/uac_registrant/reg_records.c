@@ -279,13 +279,6 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 		memcpy(p, uac->cluster_shtag.s, uac->cluster_shtag.len);
 		p += uac->cluster_shtag.len;
 	}
-	
-	if (uac->cluster_shtag.len) {
-		record->auth_hdr.s = p;
-		record->auth_hdr.len = uac->cluster_shtag.len;
-		memcpy(p, uac->cluster_shtag.s, uac->cluster_shtag.len);
-		p += uac->cluster_shtag.len;
-	}
 
 	/* Setting the flags */
 	record->flags = uac->flags;
