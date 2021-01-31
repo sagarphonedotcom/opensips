@@ -684,6 +684,7 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	int result, expires_len;
 	reg_tm_cb_t *cb_param;
 	char *p, *expires;
+	char auth_hdr_temp[512];
 	static str extra_hdrs={extra_hdrs_buf, 512};
 
 	/* Allocate space for tm callback params */
@@ -723,8 +724,10 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 LM_DBG("Before Auth header [%.*s]\n",
 		rec->auth_hdr.len,rec->auth_hdr.s);
 	if (auth_hdr) {
-		memcpy(p, auth_hdr->s, auth_hdr->len);		
-		rec->auth_hdr.s=p;
+		memcpy(p, auth_hdr->s, auth_hdr->len);	
+		memcpy(auth_hdr_tmp, auth_hdr->s, auth_hdr->len);	
+		memcpy(rec->auth_hdr.s,auth_hdr_tmp , auth_hdr->len);	
+		//rec->auth_hdr.s=p;
 		rec->auth_hdr.len=auth_hdr->len;
 		p += auth_hdr->len;
 	} else if(rec->auth_hdr.s && rec->auth_hdr.len){
