@@ -63,7 +63,6 @@
 #define UAC_REG_REGISTRAR_ERROR_STATE   "REGISTRAR_ERROR_STATE"
 #define UAC_REG_UNREGISTERING_STATE		"UNREGISTERING_STATE"
 #define UAC_REG_AUTHENTICATING_UNREGISTER_STATE	"AUTHENTICATING_UNREGISTER_STATE"
-#define UAC_REG_UNREGISTERED_STATE	"UNREGISTERED_STATE"
 
 const str uac_reg_state[]={
 	str_init(UAC_REG_NOT_REGISTERED_STATE),
@@ -76,7 +75,6 @@ const str uac_reg_state[]={
 	str_init(UAC_REG_REGISTRAR_ERROR_STATE),
 	str_init(UAC_REG_UNREGISTERING_STATE),
 	str_init(UAC_REG_AUTHENTICATING_UNREGISTER_STATE),
-	str_init(UAC_REG_UNREGISTERED_STATE),
 };
 
 /** Functions declarations */
@@ -93,6 +91,7 @@ static mi_response_t *mi_reg_reload(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
 int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr);
+
 
 /** Global variables */
 
@@ -354,125 +353,113 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to parse headers\n");
 			goto done;
 		}
-			if(rec->expires==0){
-				rec->state = UNREGISTERED_STATE;
-				break;
+		if (msg->contact) {
+			c_ptr = msg->contact;
+			while(c_ptr) {
+				if (c_ptr->type == HDR_CONTACT_T) {
+					if (!c_ptr->parsed && (parse_contact(c_ptr)<0)) {
+						LM_ERR("failed to parse Contact body\n");
+						goto done;
+					}
+				}
+				c_ptr = c_ptr->next;
 			}
-				
-				if (msg->contact) {
-					c_ptr = msg->contact;
+		} else {
+			switch(rec->state) {
+			case UNREGISTERING_STATE:
+			case AUTHENTICATING_UNREGISTER_STATE:
+				if(send_register(cb_param->hash_index, rec, NULL)==1) {
+					rec->last_register_sent = now;
+					rec->state = REGISTERING_STATE;
+				} else {
+					rec->registration_timeout = now + rec->expires - timer_interval;
+					rec->state = INTERNAL_ERROR_STATE;
+				}
+				break;
+			default:
+				LM_ERR("No contact header in received 200ok in state [%d]\n",
+					rec->state);
+				goto done;
+			}
+			break; /* done with 200ok handling */
+		}
+
+		if (rec->flags&FORCE_SINGLE_REGISTRATION) {
+			head_contact = msg->contact;
+			contact = ((contact_body_t*)msg->contact->parsed)->contacts;
+			while (contact) {
+				bindings_counter++;
+				if (contact->next == NULL) {
+					contact = NULL;
+					c_ptr = head_contact->next;
 					while(c_ptr) {
 						if (c_ptr->type == HDR_CONTACT_T) {
-							if (!c_ptr->parsed && (parse_contact(c_ptr)<0)) {
-								LM_ERR("failed to parse Contact body\n");
-								goto done;
-							}
+							head_contact = c_ptr;
+							contact = ((contact_body_t*)c_ptr->parsed)->contacts;
+							break;
 						}
 						c_ptr = c_ptr->next;
 					}
 				} else {
-					switch(rec->state) {							
-					case UNREGISTERING_STATE:
-					case AUTHENTICATING_UNREGISTER_STATE:
-						if(send_register(cb_param->hash_index, rec, NULL)==1) {
-							rec->last_register_sent = now;
-							rec->state = REGISTERING_STATE;
-						} else {
-							rec->registration_timeout = now + rec->expires - timer_interval;
-							rec->state = INTERNAL_ERROR_STATE;
-						}
-						break;
-					default:
-						LM_DBG("No contact header in received 200ok in state [%d] So we will not extract expires from contact header\n",
-							rec->state);
-						goto setexpires;
-					}
-					break; /* done with 200ok handling */
+					contact = contact->next;
 				}
-			
-				
-
-				if (rec->flags&FORCE_SINGLE_REGISTRATION) {
-					head_contact = msg->contact;
-					contact = ((contact_body_t*)msg->contact->parsed)->contacts;
-					while (contact) {
-						bindings_counter++;
-						if (contact->next == NULL) {
-							contact = NULL;
-							c_ptr = head_contact->next;
-							while(c_ptr) {
-								if (c_ptr->type == HDR_CONTACT_T) {
-									head_contact = c_ptr;
-									contact = ((contact_body_t*)c_ptr->parsed)->contacts;
-									break;
-								}
-								c_ptr = c_ptr->next;
-							}
-						} else {
-							contact = contact->next;
-						}
-					}
-					if (bindings_counter>1) {
-						LM_DBG("got [%d] bindings\n", bindings_counter);
-						if(send_unregister(cb_param->hash_index, rec, NULL)==1) {
-							rec->state = UNREGISTERING_STATE;
-						} else {
-							rec->state = INTERNAL_ERROR_STATE;
-						}
-						break;
-					}
+			}
+			if (bindings_counter>1) {
+				LM_DBG("got [%d] bindings\n", bindings_counter);
+				if(send_unregister(cb_param->hash_index, rec, NULL)==1) {
+					rec->state = UNREGISTERING_STATE;
+				} else {
+					rec->state = INTERNAL_ERROR_STATE;
 				}
-			
-				if(strncmp(rec->server_expiry.s,"false",rec->server_expiry.len)==0){
-					LM_ERR("We will not respect expires from server side because it is disabled for aor [%.*s] ",rec->td.rem_uri.len, rec->td.rem_uri.s);
-					goto setexpires;
-				}
-
-				head_contact = msg->contact;
-				contact = ((contact_body_t*)msg->contact->parsed)->contacts;
-				while (contact) {
-					/* Check for binding */
-					if (contact->uri.len==rec->contact_uri.len &&
-						strncmp(contact->uri.s,rec->contact_uri.s,contact->uri.len)==0){
-						if (contact->expires && contact->expires->body.len) {
-							if (str2int(&contact->expires->body, &exp)<0) {
-								LM_ERR("Unable to extract expires from [%.*s]"
-									" for binding [%.*s]\n",
-									contact->expires->body.len,
-									contact->expires->body.s,
-									contact->uri.len, contact->uri.s);
-							}
-						}
-						break;
-					}
-
-					/* get the next contact */
-					if (contact->next == NULL) {
-						contact = NULL;
-						c_ptr = head_contact->next;
-						while(c_ptr) {
-							if (c_ptr->type == HDR_CONTACT_T) {
-								head_contact = c_ptr;
-								contact = ((contact_body_t*)c_ptr->parsed)->contacts;
-								break;
-							}
-							c_ptr = c_ptr->next;
-						}
-					} else {
-						contact = contact->next;
-					}
-				}
-			setexpires:
-				rec->state = REGISTERED_STATE;
-				if (exp) rec->expires = exp;
-				if (rec->expires <= timer_interval) {
-					LM_ERR("Please decrease timer_interval=[%u]"
-						" - imposed server expires [%u] to small for AOR=[%.*s]\n",
-						timer_interval, rec->expires,
-						rec->td.rem_uri.len, rec->td.rem_uri.s);
-				}
-				rec->registration_timeout = now + rec->expires - timer_interval;
 				break;
+			}
+		}
+
+		head_contact = msg->contact;
+		contact = ((contact_body_t*)msg->contact->parsed)->contacts;
+		while (contact) {
+			/* Check for binding */
+			if (contact->uri.len==rec->contact_uri.len &&
+				strncmp(contact->uri.s,rec->contact_uri.s,contact->uri.len)==0){
+				if (contact->expires && contact->expires->body.len) {
+					if (str2int(&contact->expires->body, &exp)<0) {
+						LM_ERR("Unable to extract expires from [%.*s]"
+							" for binding [%.*s]\n",
+							contact->expires->body.len,
+							contact->expires->body.s,
+							contact->uri.len, contact->uri.s);
+					}
+				}
+				break;
+			}
+
+			/* get the next contact */
+			if (contact->next == NULL) {
+				contact = NULL;
+				c_ptr = head_contact->next;
+				while(c_ptr) {
+					if (c_ptr->type == HDR_CONTACT_T) {
+						head_contact = c_ptr;
+						contact = ((contact_body_t*)c_ptr->parsed)->contacts;
+						break;
+					}
+					c_ptr = c_ptr->next;
+				}
+			} else {
+				contact = contact->next;
+			}
+		}
+		rec->state = REGISTERED_STATE;
+		if (exp) rec->expires = exp;
+		if (rec->expires <= timer_interval) {
+			LM_ERR("Please decrease timer_interval=[%u]"
+				" - imposed server expires [%u] to small for AOR=[%.*s]\n",
+				timer_interval, rec->expires,
+				rec->td.rem_uri.len, rec->td.rem_uri.s);
+		}
+		rec->registration_timeout = now + rec->expires - timer_interval;
+		break;
+
 	case WWW_AUTH_CODE:
 	case PROXY_AUTH_CODE:
 		msg = ps->rpl;
@@ -507,10 +494,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			auth->nonce.len, auth->nonce.s,
 			auth->opaque.len, auth->opaque.s,
 			auth->qop.len, auth->qop.s);
-            
 
-        
-        
 		switch(rec->state) {
 		case REGISTERING_STATE:
 		case UNREGISTERING_STATE:
@@ -554,7 +538,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to build authorization hdr\n");
 			goto done;
 		}
-
 		switch(rec->state) {
 		case REGISTERING_STATE:
 			if(send_register(cb_param->hash_index, rec, new_hdr)==1) {
@@ -655,8 +638,8 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 
 	/* Initialize slinkedl run traversal data */
 	tm_cback_data.t = t;
-        tm_cback_data.ps = ps;
-        tm_cback_data.cb_param = cb_param;
+    tm_cback_data.ps = ps;
+    tm_cback_data.cb_param = cb_param;
 	tm_cback_data.now = now;
 
 	lock_get(&reg_htable[cb_param->hash_index].lock);
@@ -671,6 +654,7 @@ void reg_tm_cback(struct cell *t, int type, struct tmcb_params *ps)
 
 	return;
 }
+
 
 int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
@@ -714,9 +698,9 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
 
 	if (auth_hdr) {
-		memcpy(p, auth_hdr->s, auth_hdr->len);	
+		memcpy(p, auth_hdr->s, auth_hdr->len);
 		p += auth_hdr->len;
-	} 
+	}
 	extra_hdrs.len = (int)(p - extra_hdrs.s);
 
 	LM_DBG("extra_hdrs=[%p][%d]->[%.*s]\n",
@@ -740,9 +724,9 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 
 int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 {
-	int result,expires_len;
+	int result;
 	reg_tm_cb_t *cb_param;
-	char *p,*expires;
+	char *p;
 
 	/* Allocate space for tm callback params */
 	cb_param = shm_malloc(sizeof(reg_tm_cb_t));
@@ -752,38 +736,19 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	}
 	cb_param->hash_index = hash_index;
 	cb_param->uac = rec;
-        /* get the string version of expires */
-	expires = int2str((unsigned long)(rec->expires), &expires_len);
+
 	p = extra_hdrs.s;
 	memcpy(p, contact_hdr.s, contact_hdr.len);
 	p += contact_hdr.len;
-	/**p = '*'; p++;
-	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;*/
-	*p = '<'; p++;
-	memcpy(p, rec->contact_uri.s, rec->contact_uri.len);
-	p += rec->contact_uri.len;
-	*p = '>'; p++;
-	memcpy(p, rec->contact_params.s, rec->contact_params.len);
-	p += rec->contact_params.len;
-	if (1) {
-		/* adding exiration time as a parameter */
-		memcpy(p, expires_param.s, expires_param.len);
-		p += expires_param.len;
-	} else {
-		/* adding exiration time as a header */
-		memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-		memcpy(p, expires_hdr.s, expires_hdr.len);
-		p += expires_hdr.len;
-	}
-	memcpy(p, expires, expires_len);
-	p += expires_len;
+	*p = '*'; p++;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
+
 	/* adding exires header */
-	/*memcpy(p, expires_hdr.s, expires_hdr.len);
+	memcpy(p, expires_hdr.s, expires_hdr.len);
 	p += expires_hdr.len;
 	*p = '0'; p++;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-*/
+
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
 		p += auth_hdr->len;
@@ -822,10 +787,6 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	time_t now = t_check_data->now;
 	str *s_now = t_check_data->s_now;
 	unsigned int i = t_check_data->hash_counter;
-        //str *new_hdr;
-	//char *p;
-//     new_hdr->s = NULL; new_hdr->len = 0;
-
 
 	if (!ureg_cluster_shtag_is_active( &rec->cluster_shtag, rec->cluster_id))
 		return 0;
@@ -833,8 +794,6 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	switch(rec->state){
 	case REGISTERING_STATE:
 	case UNREGISTERING_STATE:
-	case UNREGISTERED_STATE:
-		break;
 	case AUTHENTICATING_STATE:
 	case AUTHENTICATING_UNREGISTER_STATE:
 		break;
@@ -842,13 +801,7 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 	case REGISTER_TIMEOUT_STATE:
 	case INTERNAL_ERROR_STATE:
 	case REGISTRAR_ERROR_STATE:
-		
 		reg_print_record(rec);
-		rec->failed_attempts++;
-		if(rec->failed_attempts > 4){
-			LM_ERR("Max failed attempts exceeded for rec [%p]\n", rec);
-			break;
-		}
 		new_call_id_ftag_4_record(rec, s_now);
 		if(send_register(i, rec, NULL)==1) {
 			rec->last_register_sent = now;
@@ -864,21 +817,12 @@ int run_timer_check(void *e_data, void *data, void *r_data)
 			break;
 		}
 	case NOT_REGISTERED_STATE:
-		rec->failed_attempts=0;
-		if(rec->expires==0){
-			if(send_unregister(i, rec, NULL)==1) {
-				rec->state = UNREGISTERING_STATE;
-			} else {
-				rec->state = INTERNAL_ERROR_STATE;
-			}
-		}else{
-			if(send_register(i, rec, NULL)==1) {
-				rec->last_register_sent = now;
-				rec->state = REGISTERING_STATE;
-			} else {
-				rec->registration_timeout = now + rec->expires - timer_interval;
-				rec->state = INTERNAL_ERROR_STATE;
-			}
+		if(send_register(i, rec, NULL)==1) {
+			rec->last_register_sent = now;
+			rec->state = REGISTERING_STATE;
+		} else {
+			rec->registration_timeout = now + rec->expires - timer_interval;
+			rec->state = INTERNAL_ERROR_STATE;
 		}
 		break;
 	default:
@@ -1033,10 +977,10 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 		if (add_mi_string(record_item, MI_SSTR("binding_params"),
 			rec->contact_params.s, rec->contact_params.len) < 0)
 			goto error;
-//Always print third party registrant value 
-	if(rec->third_party_registrant.s && rec->third_party_registrant.len)
+
+	if(rec->td.loc_uri.s != rec->td.rem_uri.s)
 		if (add_mi_string(record_item, MI_SSTR("third_party_registrant"),
-			rec->third_party_registrant.s, rec->third_party_registrant.len) < 0)
+			rec->td.loc_uri.s, rec->td.loc_uri.len) < 0)
 			goto error;
 
 	if (rec->td.obp.s && rec->td.obp.len)
@@ -1046,10 +990,6 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 
 	switch(rec->td.forced_to_su.s.sa_family) {
 	case AF_UNSPEC:
-		if(rec->dest_ip.s){
-			if (add_mi_string(record_item, MI_SSTR("ip"), rec->dest_ip.s,rec->dest_ip.len) < 0)
-			goto error;
-		}
 		break;
 	case AF_INET:
 	case AF_INET6:
@@ -1060,8 +1000,6 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 		p = ip_addr2a(&addr);
 		if (p == NULL) goto error;
 		len = strlen(p);
-		rec->dest_ip.s=p;
-		rec->dest_ip.len=len;
 		if (add_mi_string(record_item, MI_SSTR("ip"), p, len) < 0)
 			goto error;
 		break;
@@ -1132,7 +1070,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 	reg_record_t *new_rec = (reg_record_t*)data;
 
 	if ((old_rec->state == REGISTERED_STATE) &&
-	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri, &new_rec->contact_uri) == 0) && (str_strcmp(&old_rec->proxy_uri, &new_rec->proxy_uri) == 0) && (str_strcmp(&old_rec->server_expiry, &new_rec->server_expiry) == 0) && (new_rec->expires!=old_rec->expires)) {
+	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0)) {
 		memcpy(new_rec->td.id.call_id.s, old_rec->td.id.call_id.s,
 		    new_rec->td.id.call_id.len);
 		memcpy(new_rec->td.id.loc_tag.s, old_rec->td.id.loc_tag.s,
@@ -1140,17 +1078,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 		new_rec->td.loc_seq.value = old_rec->td.loc_seq.value;
 		new_rec->last_register_sent = old_rec->last_register_sent;
 		new_rec->registration_timeout = old_rec->registration_timeout;
-		memcpy(new_rec->dest_ip.s, old_rec->dest_ip.s,
-		    new_rec->dest_ip.len);
-		new_rec->dest_ip = old_rec->dest_ip;
-		if(new_rec->expires==0){
-			new_rec->state = NOT_REGISTERED_STATE;
-			new_rec->registration_timeout = old_rec->last_register_sent;
-		} else {
-			new_rec->state = old_rec->state;
-
-		}
-		new_rec->failed_attempts=0; //In case of reg reload, reset failed attempts
+		new_rec->state = old_rec->state;
 	}
 	return 0;
 }
@@ -1213,3 +1141,4 @@ error:
 	}
 	return NULL;
 }
+

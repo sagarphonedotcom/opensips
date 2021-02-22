@@ -980,9 +980,6 @@ modparam("drouting", "extra_prefix_chars", "#-%")
        to get this
      * flags (string, optional) - a list of letter-like flags for
        controlling the routing behavior. Possible flags are:
-          + W - Instead of using the destination (from the rule
-            definition) in the given order, sort them based on
-            their weight.
           + F - Enable rule fallback; normally the engine is using
             a single rule for routing a call; by setting this
             flag, the engine will fallback and use rules with less
@@ -994,6 +991,13 @@ modparam("drouting", "extra_prefix_chars", "#-%")
           + C - Only check if the dialed number matches any
             routing rule, without loading / applying any routing
             info (no GW is set, the RURI is not altered)
+          + W (deprecated) - Instead of using the destination
+            (from the rule definition) in the given order, sort
+            them based on their weight.
+            This flag is deprecated in 3.1+. The new approach is
+            to set a "W" value as the "sort_alg" column of the
+            dr_rules or dr_carriers tables. See the Dynamic
+            Routing DB schema for more details.
      * gw_whitelist (string, optional) - a comma separated white
        list of gateways. This will force routing over, at most,
        this list of carriers or gateways (in other words, the
@@ -1659,8 +1663,8 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 373 176 12928 5555
-   2. Liviu Chircu (@liviuchircu) 123 65 2100 2392
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 374 177 12931 5555
+   2. Liviu Chircu (@liviuchircu) 125 67 2115 2400
    3. Razvan Crainea (@razvancrainea) 93 47 1144 2182
    4. Mihai Tiganus (@tallicamike) 71 20 4301 910
    5. Vlad Patrascu (@rvlad-patrascu) 38 17 1090 728
@@ -1674,7 +1678,8 @@ Chapter 3. Contributors
    (@JeremyMartinez51), Dusan Klinec (@ph4r05), Matt Lehner,
    Julián Moreno Patiño, Sergio Gutierrez, Le Roy Christophe, Nick
    Altmann (@nikbyte), Peter Lemenkov (@lemenkov), Alexey Vasilyev
-   (@vasilevalex), Ozzyboshi, Walter Doekes (@wdoekes).
+   (@vasilevalex), Ozzyboshi, Aron Podrigal (@ar45), Walter Doekes
+   (@wdoekes).
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1696,22 +1701,23 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Razvan Crainea (@razvancrainea)     Sep 2010 - Oct 2020
-   2.  Liviu Chircu (@liviuchircu)         Nov 2012 - Aug 2020
-   3.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2008 - Jul 2020
-   4.  Vlad Patrascu (@rvlad-patrascu)     Mar 2017 - Jan 2020
-   5.  Vlad Paiu (@vladpaiu)               Aug 2011 - Nov 2018
-   6.  Alexey Vasilyev (@vasilevalex)      Oct 2018 - Oct 2018
-   7.  Peter Lemenkov (@lemenkov)          Jun 2018 - Jun 2018
-   8.  Ovidiu Sas (@ovidiusas)             May 2012 - Mar 2017
-   9.  Jeremy Martinez (@JeremyMartinez51) Feb 2017 - Feb 2017
-   10. Le Roy Christophe                   Feb 2017 - Feb 2017
+   1.  Liviu Chircu (@liviuchircu)         Nov 2012 - Jan 2021
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2008 - Jan 2021
+   3.  Aron Podrigal (@ar45)               Nov 2020 - Nov 2020
+   4.  Razvan Crainea (@razvancrainea)     Sep 2010 - Oct 2020
+   5.  Vlad Patrascu (@rvlad-patrascu)     Mar 2017 - Jan 2020
+   6.  Vlad Paiu (@vladpaiu)               Aug 2011 - Nov 2018
+   7.  Alexey Vasilyev (@vasilevalex)      Oct 2018 - Oct 2018
+   8.  Peter Lemenkov (@lemenkov)          Jun 2018 - Jun 2018
+   9.  Ovidiu Sas (@ovidiusas)             May 2012 - Mar 2017
+   10. Jeremy Martinez (@JeremyMartinez51) Feb 2017 - Feb 2017
 
-   All remaining contributors: Ionut Ionita (@ionutrazvanionita),
-   Ozzyboshi, Julián Moreno Patiño, Dusan Klinec (@ph4r05), Mihai
-   Tiganus (@tallicamike), Andrei Datcu (@andrei-datcu), Walter
-   Doekes (@wdoekes), Nick Altmann (@nikbyte), Matt Lehner, Anca
-   Vamanu, Andrei Dragus, Sergio Gutierrez.
+   All remaining contributors: Le Roy Christophe, Ionut Ionita
+   (@ionutrazvanionita), Ozzyboshi, Julián Moreno Patiño, Dusan
+   Klinec (@ph4r05), Mihai Tiganus (@tallicamike), Andrei Datcu
+   (@andrei-datcu), Walter Doekes (@wdoekes), Nick Altmann
+   (@nikbyte), Matt Lehner, Anca Vamanu, Andrei Dragus, Sergio
+   Gutierrez.
 
    (1) including any documentation-related commits, excluding
    merge commits
@@ -1720,12 +1726,12 @@ Chapter 4. Documentation
 
 4.1. Contributors
 
-   Last edited by: Razvan Crainea (@razvancrainea), Bogdan-Andrei
-   Iancu (@bogdan-iancu), Vlad Patrascu (@rvlad-patrascu), Liviu
-   Chircu (@liviuchircu), Alexey Vasilyev (@vasilevalex), Peter
-   Lemenkov (@lemenkov), Ionut Ionita (@ionutrazvanionita), Vlad
-   Paiu (@vladpaiu), Mihai Tiganus (@tallicamike), Andrei Datcu
-   (@andrei-datcu), Matt Lehner, Anca Vamanu, Andrei Dragus,
+   Last edited by: Liviu Chircu (@liviuchircu), Razvan Crainea
+   (@razvancrainea), Bogdan-Andrei Iancu (@bogdan-iancu), Vlad
+   Patrascu (@rvlad-patrascu), Alexey Vasilyev (@vasilevalex),
+   Peter Lemenkov (@lemenkov), Ionut Ionita (@ionutrazvanionita),
+   Vlad Paiu (@vladpaiu), Mihai Tiganus (@tallicamike), Andrei
+   Datcu (@andrei-datcu), Matt Lehner, Anca Vamanu, Andrei Dragus,
    Sergio Gutierrez.
 
    Documentation Copyrights:

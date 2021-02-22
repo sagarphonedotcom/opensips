@@ -60,8 +60,8 @@ int_str_t *kv_put(map_t _store, const str* _key, const int_str_t* _val)
 			LM_ERR("oom\n");
 			return NULL;
 		}
-		memset(*cur, 0, sizeof **cur);
 
+		memset(*cur, 0, sizeof **cur);
 	}
 
 	new_val = *cur;
@@ -227,7 +227,7 @@ static void destroy_kv_store_val(void* _val)
 {
 	int_str_t *val = (int_str_t *)_val;
 
-	if (val->is_str && !ZSTR(val->s))
+	if (val->is_str && val->s.s)
 		shm_free(val->s.s);
 
 	shm_free(val);

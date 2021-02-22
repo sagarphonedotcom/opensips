@@ -481,6 +481,11 @@ inline static int pathmax(void)
 	return pathmax;
 }
 
+#define _isxdigit(c) \
+	((c >= '0' && c <= '9') || \
+	 (c >= 'a' && c <= 'f') || \
+	 (c >= 'A' && c <= 'F'))
+
 inline static int hex2int(char hex_digit)
 {
 	if (hex_digit>='0' && hex_digit<='9')
@@ -754,10 +759,14 @@ static inline int shm_str_dup(str* dst, const str* src)
 /*
  * Make a copy of an str structure using shm_malloc
  *	  + an additional '\0' byte, so you can make use of dst->s
+ *
+ * dst == src is allowed!
  */
 static inline int shm_nt_str_dup(str* dst, const str* src)
 {
-	if (!src->s) {
+	const str _src = *src;
+
+	if (!_src.s) {
 		memset(dst, 0, sizeof *dst);
 		return 0;
 	}
@@ -766,36 +775,44 @@ static inline int shm_nt_str_dup(str* dst, const str* src)
 	if (!dst->s) {
 		LM_ERR("no shared memory left\n");
 		dst->len = 0;
+		if (dst == src)
+			*dst = _src;
 		return -1;
 	}
 
-	memcpy(dst->s, src->s, src->len);
-	dst->len = src->len;
-	dst->s[dst->len] = '\0';
+	memcpy(dst->s, _src.s, _src.len);
+	dst->len = _src.len;
+	dst->s[_src.len] = '\0';
 	return 0;
 }
 
 /*
  * Make a copy of an str structure using pkg_malloc
  *	  + an additional '\0' byte, so you can make use of dst->s
+ *
+ * dst == src is allowed!
  */
 static inline int pkg_nt_str_dup(str* dst, const str* src)
 {
-	if (!src->s) {
+	const str _src = *src;
+
+	if (!_src.s) {
 		memset(dst, 0, sizeof *dst);
 		return 0;
 	}
 
-	dst->s = pkg_malloc(src->len + 1);
+	dst->s = pkg_malloc(_src.len + 1);
 	if (!dst->s) {
 		LM_ERR("no private memory left\n");
 		dst->len = 0;
+		if (dst == src)
+			*dst = _src;
 		return -1;
 	}
 
-	memcpy(dst->s, src->s, src->len);
-	dst->len = src->len;
-	dst->s[dst->len] = '\0';
+	memcpy(dst->s, _src.s, _src.len);
+	dst->len = _src.len;
+	dst->s[_src.len] = '\0';
 	return 0;
 }
 
