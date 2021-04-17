@@ -223,10 +223,12 @@ static int mod_init(void)
 		LM_ERR("default_expires to short: [%d]<15\n", default_expires);
 		return -1;
 	}
+	/* Remove valuation for timer internal. - Sagar Patch 
 	if(timer_interval<10){
 		LM_ERR("timer_interval to short: [%d]<10\n", timer_interval);
 		return -1;
-	}
+	}*/
+	
 	if(reg_hsize<1 || reg_hsize>20) {
 		LM_ERR("Wrong hash size: 20<[%d]<1\n", reg_hsize);
 	}
