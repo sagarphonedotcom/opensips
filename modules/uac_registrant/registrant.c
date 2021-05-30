@@ -779,11 +779,12 @@ int send_unregister(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	p += expires_len;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
 	/* adding exires header */
-	/*memcpy(p, expires_hdr.s, expires_hdr.len);
+	memcpy(p, expires_hdr.s, expires_hdr.len);
 	p += expires_hdr.len;
-	*p = '0'; p++;
+	memcpy(p, "0", 1);
+        p++;
 	memcpy(p, CRLF, CRLF_LEN); p += CRLF_LEN;
-*/
+
 	if (auth_hdr) {
 		memcpy(p, auth_hdr->s, auth_hdr->len);
 		p += auth_hdr->len;
