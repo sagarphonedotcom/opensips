@@ -354,6 +354,25 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("failed to parse headers\n");
 			goto done;
 		}
+		 // ******* Changes made for registrant- invalid  reasons with 'ok' response ****
+                str*  msg_rep_reason =&msg->first_line.u.reply.reason;
+        //      LM_DBG(" Reply-reason:%s\n",msg_rep_reason->s);
+                if(strncasecmp(msg_rep_reason->s,"ok",msg_rep_reason->len)!=0)
+                {
+                        if(strncasecmp(msg_rep_reason->s,"authorization failure",msg_rep_reason->len)==0)
+                        {
+                                rec->state = WRONG_CREDENTIALS_STATE;
+                                LM_WARN(" State changed to WRONG_CREDENTIALS due to :%s\n",msg_rep_reason->s);
+                        }
+                        else
+                        {
+                                rec->state = UNREGISTERED_STATE;
+                                LM_WARN(" State Changed  to UNREGISTERED due to :%s\n",msg_rep_reason->s);
+                        }
+                        break;
+                }
+                //*************
+
 			if(rec->expires==0){
 				rec->state = UNREGISTERED_STATE;
 				break;
