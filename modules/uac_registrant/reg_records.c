@@ -128,6 +128,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	str call_id_ftag;
 	char *p;
 	slinkedl_list_t *list;
+	char *custom_port = NULL;
 
 	/* Reserve space for record */
 	size = sizeof(reg_record_t) + MD5_LEN +
@@ -230,6 +231,8 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	/* Setting the socket */
 	td->send_sock = uac->send_sock;
 	/* Done with td */
+	memcpy( custom_port, td->send_sock->port_no_str.s, td->send_sock->port_no_str.len);
+        LM_DBG("custom_port=[%c]\n", *custom_port);
 
 	if (uac->auth_user.s && uac->auth_user.len) {
 		record->auth_user.s = p;
