@@ -339,7 +339,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 
 	reg_print_record(rec);
 	
-	socketstring = socket2str(uac->send_sock, NULL, &length, 0);
+	socketstring = socket2str(rec->td.send_sock, NULL, &length, 0);
         LM_DBG("custom_port=[%s]\n", socketstring);
 
 	if (ps->rpl==FAKED_REPLY)
