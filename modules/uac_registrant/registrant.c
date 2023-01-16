@@ -324,8 +324,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	struct tmcb_params *ps;
 	time_t now;
 	reg_tm_cb_t *cb_param;
-	int length;
-	char* socketstring;
 
 	cb_param = tm_cback_data->cb_param;
 	if (rec!=cb_param->uac) {
@@ -339,8 +337,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 
 	reg_print_record(rec);
 	
-	socketstring = socket2str(rec->td.send_sock, NULL, &length, 0);
-        LM_DBG("custom_port=[%s]\n", socketstring);
+        LM_DBG("custom_port=[%d]\n", rec->td.send_sock->last_local_real_port);
 
 	if (ps->rpl==FAKED_REPLY)
 		memset(&rec->td.forced_to_su, 0, sizeof(union sockaddr_union));
