@@ -231,6 +231,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	/* Setting the socket */
 	td->send_sock = uac->send_sock;
 	/* Done with td */
+	custom_port = (char*) malloc(sizeof(td->send_sock->port_no_str));
 	memcpy( custom_port, td->send_sock->port_no_str.s, td->send_sock->port_no_str.len);
         LM_DBG("custom_port=[%c]\n", *custom_port);
 
