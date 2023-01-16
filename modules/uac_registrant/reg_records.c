@@ -128,7 +128,6 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	str call_id_ftag;
 	char *p;
 	slinkedl_list_t *list;
-	char *custom_port = NULL;
 
 
 	/* Reserve space for record */
