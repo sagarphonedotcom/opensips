@@ -233,8 +233,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	/* Setting the socket */
 	td->send_sock = uac->send_sock;
 	/* Done with td */
-	socketstring = socket2str(uac->send_sock, NULL, &length, 0);
-        LM_DBG("custom_port=[%s]\n", socketstring);
+
 
 	if (uac->auth_user.s && uac->auth_user.len) {
 		record->auth_user.s = p;
