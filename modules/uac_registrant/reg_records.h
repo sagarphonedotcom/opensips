@@ -94,6 +94,7 @@ typedef struct reg_record {
 	unsigned int flags;
 	struct reg_record *prev;
 	struct reg_record *next;
+	int local_src_port //local port used by opensips to send register request
 } reg_record_t;
 
 typedef struct reg_entry {
