@@ -129,8 +129,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	char *p;
 	slinkedl_list_t *list;
 	char *custom_port = NULL;
-	char* socketstring;
-	int length;
+
 
 	/* Reserve space for record */
 	size = sizeof(reg_record_t) + MD5_LEN +
