@@ -336,6 +336,9 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	now = tm_cback_data->now;
 
 	reg_print_record(rec);
+	
+        LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
+	rec->local_src_port=rec->td.send_sock->last_local_real_port;
 
 	if (ps->rpl==FAKED_REPLY)
 		memset(&rec->td.forced_to_su, 0, sizeof(union sockaddr_union));
@@ -1102,6 +1105,8 @@ int run_mi_reg_list(void *e_data, void *data, void *r_data)
 		if (add_mi_number(record_item, MI_SSTR("cluster_id"), rec->cluster_id) < 0)
 			goto error;
 		}
+	if (add_mi_number(record_item, MI_SSTR("local_port"), rec->local_src_port) < 0)
+		goto error;
 
 	/* action successfully completed on current list element */
 	return 0; /* continue list traversal */

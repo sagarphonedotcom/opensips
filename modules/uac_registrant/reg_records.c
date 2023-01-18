@@ -129,6 +129,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	char *p;
 	slinkedl_list_t *list;
 
+
 	/* Reserve space for record */
 	size = sizeof(reg_record_t) + MD5_LEN +
 		uac->to_uri.len + uac->from_uri.len + uac->registrar_uri.len +
@@ -230,6 +231,7 @@ int add_record(uac_reg_map_t *uac, str *now, unsigned int plist)
 	/* Setting the socket */
 	td->send_sock = uac->send_sock;
 	/* Done with td */
+
 
 	if (uac->auth_user.s && uac->auth_user.len) {
 		record->auth_user.s = p;
