@@ -337,9 +337,6 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 
 	reg_print_record(rec);
 	
-        LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
-	rec->local_src_port=rec->td.send_sock->last_local_real_port;
-
 	if (ps->rpl==FAKED_REPLY)
 		memset(&rec->td.forced_to_su, 0, sizeof(union sockaddr_union));
 	else if (rec->td.forced_to_su.s.sa_family == AF_UNSPEC)
@@ -348,6 +345,13 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	statuscode = ps->code;
 	switch(statuscode) {
 	case 200:
+		if(rec && rec->td && rec->td.send_sock ){
+       			LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
+			rec->local_src_port=rec->td.send_sock->last_local_real_port;
+		} else {
+			LM_DBG("rec or rec->td.send_sock does not existing. So cannot set local port\n");
+			rec->local_src_port=0;
+		}
 		msg = ps->rpl;
 		if(msg==FAKED_REPLY) {
 			LM_ERR("FAKED_REPLY\n");
