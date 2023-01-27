@@ -345,7 +345,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	statuscode = ps->code;
 	switch(statuscode) {
 	case 200:
-		if(rec && rec->td && rec->td.send_sock ){
+		if(rec->td.send_sock ){
        			LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
 			rec->local_src_port=rec->td.send_sock->last_local_real_port;
 		} else {
