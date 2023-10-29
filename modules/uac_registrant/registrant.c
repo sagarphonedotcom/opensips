@@ -197,6 +197,7 @@ struct module_exports exports= {
 };
 
 
+
 /** Module init function */
 static int mod_init(void)
 {
@@ -278,6 +279,48 @@ static int mod_init(void)
 	return 0;
 }
 
+//Function which will take string like this "sip:0E92E56974DD483F933BB5893FF878BB-410@138.2.95.43:5060;transport=tls" as input and replace string between : and ; with 2nd parameter which will be passed as integer
+void replace_string_between_char(str *input_str, char start_char, char end_char, int replace_num)
+{
+    char *start_ptr, *end_ptr;
+    char *start_ptr1, *end_ptr1;
+    int len;
+    str temp_str;
+    char *temp_str_ptr;
+    char temp_str_buf[512];
+    char replace_str[16];
+    sprintf(replace_str, "%d", replace_num);
+    start_ptr = strchr(input_str->s, start_char);
+    if(start_ptr != NULL)
+    {
+        end_ptr = strchr(start_ptr, end_char);
+        if(end_ptr != NULL)
+        {
+            start_ptr1 = strchr(start_ptr, ':');
+            if(start_ptr1 != NULL)
+            {
+                end_ptr1 = strchr(start_ptr1, ';');
+                if(end_ptr1 != NULL)
+                {
+                    len = end_ptr - start_ptr1;
+                    temp_str.s = temp_str_buf;
+                    temp_str.len = 0;
+                    temp_str_ptr = temp_str_buf;
+                    memcpy(temp_str_ptr, input_str->s, start_ptr1 - input_str->s);
+                    temp_str_ptr += (start_ptr1 - input_str->s);
+                    temp_str.len += (start_ptr1 - input_str->s);
+                    memcpy(temp_str_ptr, replace_str, strlen(replace_str));
+                    temp_str_ptr += strlen(replace_str);
+                    temp_str.len += strlen(replace_str);
+                    memcpy(temp_str_ptr, end_ptr1, input_str->s + input_str->len - end_ptr1);
+                    temp_str.len += (input_str->s + input_str->len - end_ptr1);
+                    temp_str_ptr += (input_str->s + input_str->len - end_ptr1);
+                    *input_str = temp_str;
+                }
+            }
+        }
+    }
+}
 
 static void mod_destroy(void)
 {
@@ -505,6 +548,11 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 		if(msg==FAKED_REPLY) {
 			LM_ERR("FAKED_REPLY\n");
 			goto done;
+		}
+
+		if(rec && rec->td.send_sock ){
+       		LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
+			replace_string_between_char(rec->contact_uri, ':', ';', rec->td.send_sock->last_local_real_port);
 		}
 
 		if (rec->auth_user.s==NULL || rec->auth_user.len==0 ||
