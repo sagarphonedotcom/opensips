@@ -551,7 +551,8 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 		}
 
 		if(rec && rec->td.send_sock ){
-       		LM_DBG("Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
+			
+       		LM_DBG("Inside www auth code : Local Port used to send register request =[%d]\n", rec->td.send_sock->last_local_real_port);
 			replace_string_between_char(rec->contact_uri, ':', ';', rec->td.send_sock->last_local_real_port);
 		}
 
