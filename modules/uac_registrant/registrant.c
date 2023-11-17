@@ -110,6 +110,8 @@ static str register_method = str_init("REGISTER");
 static str contact_hdr = str_init("Contact: ");
 static str expires_hdr = str_init("Expires: ");
 static str expires_param = str_init(";expires=");
+static str true_test = str_init("true");
+static str false_test = str_init("false");
 
 char extra_hdrs_buf[512];
 static str extra_hdrs={extra_hdrs_buf, 512};
@@ -1160,8 +1162,8 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 	reg_record_t *old_rec = (reg_record_t*)e_data;
 	reg_record_t *new_rec = (reg_record_t*)data;
 
-	if ((old_rec->state == REGISTERED_STATE) &&
-	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri, &new_rec->contact_uri) == 0) && (str_strcmp(&old_rec->proxy_uri, &new_rec->proxy_uri) == 0) && (str_strcmp(&old_rec->server_expiry, &new_rec->server_expiry) == 0) && (new_rec->expires!=old_rec->expires)) {
+	if (((old_rec->state == REGISTERED_STATE) || (old_rec->state == UNREGISTERED_STATE)) &&
+	    (str_strcmp(&old_rec->td.rem_uri, &new_rec->td.rem_uri) == 0) && (str_strcmp(&old_rec->contact_uri, &new_rec->contact_uri) == 0) && (str_strcmp(&old_rec->proxy_uri, &new_rec->proxy_uri) == 0) && (str_strcmp(&old_rec->server_expiry, &new_rec->server_expiry) == 0)) {
 		memcpy(new_rec->td.id.call_id.s, old_rec->td.id.call_id.s,
 		    new_rec->td.id.call_id.len);
 		memcpy(new_rec->td.id.loc_tag.s, old_rec->td.id.loc_tag.s,
@@ -1172,11 +1174,30 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 		memcpy(new_rec->dest_ip.s, old_rec->dest_ip.s,
 		    new_rec->dest_ip.len);
 		new_rec->dest_ip = old_rec->dest_ip;
-		if(new_rec->expires==0){
-			new_rec->state = NOT_REGISTERED_STATE;
-			new_rec->registration_timeout = old_rec->last_register_sent;
+
+		LM_DBG("Inside run compare rec function\n Old Expires=%d , New Expires=%d \n Old Server Expiry= [%.*s] , New Server Expiry=[%.*s]",old_rec->expires,new_rec->expires,old_rec->server_expiry.len,old_rec->server_expiry.s,new_rec->server_expiry.len,new_rec->server_expiry.s);
+		
+		if (old_rec->state == REGISTERED_STATE){
+
+			if(str_strcmp(&new_rec->server_expiry,&false_test) == 0 && new_rec->expires!=old_rec->expires){
+				LM_DBG("In false test");
+				new_rec->state = NOT_REGISTERED_STATE;
+				new_rec->registration_timeout = old_rec->last_register_sent;
+			} else if(str_strcmp(&new_rec->server_expiry,&true_test) == 0 && new_rec->expires==0) {
+				LM_DBG("In True Test");
+				new_rec->state = NOT_REGISTERED_STATE;
+				new_rec->registration_timeout = old_rec->last_register_sent;
+			} else {
+				new_rec->state = old_rec->state;
+
+			}
 		} else {
-			new_rec->state = old_rec->state;
+			if(new_rec->expires!=0) {
+				new_rec->state = NOT_REGISTERED_STATE;
+				new_rec->registration_timeout = old_rec->last_register_sent;
+			} else {
+				new_rec->state = old_rec->state;
+			}
 
 		}
 		new_rec->failed_attempts=0; //In case of reg reload, reset failed attempts
