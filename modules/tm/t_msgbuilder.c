@@ -792,7 +792,7 @@ char* build_uac_req(str* method, str* headers, str* body, dlg_t* dialog,
 	char* buf, *w;
 	str content_length, cseq, via, mf;
 	//str *cid = tm_via_cid(); Commented by sagar malam to add rport in all the via headers
-	static str rport = str_init(";rport");
+	static str rport = str_init(";rport;alias");
 
 	if (!method || !dialog) {
 		LM_ERR("inalid parameter value\n");
