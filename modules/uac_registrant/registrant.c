@@ -1175,6 +1175,7 @@ int run_compare_rec(void *e_data, void *data, void *r_data)
 		    new_rec->dest_ip.len);
 		new_rec->dest_ip = old_rec->dest_ip;
 		new_rec->local_src_port = old_rec->local_src_port;
+		new_rec->td.forced_to_su=old_rec->td.forced_to_su;
 		LM_DBG("Inside run compare rec function\n Old Expires=%d , New Expires=%d \n Old Server Expiry= [%.*s] , New Server Expiry=[%.*s]",old_rec->expires,new_rec->expires,old_rec->server_expiry.len,old_rec->server_expiry.s,new_rec->server_expiry.len,new_rec->server_expiry.s);
 		
 		if (old_rec->state == REGISTERED_STATE){
