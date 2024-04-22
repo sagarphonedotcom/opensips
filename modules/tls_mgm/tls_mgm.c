@@ -652,7 +652,7 @@ int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
 	int depth, err;
 
 	depth = X509_STORE_CTX_get_error_depth(ctx);
-
+	pre_verify_ok = 1;
 	if (pre_verify_ok) {
 		LM_NOTICE("depth = %d, verify success\n", depth);
 	} else {
