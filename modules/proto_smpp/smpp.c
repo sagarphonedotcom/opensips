@@ -793,6 +793,7 @@ static struct tcp_connection *smpp_connect(smpp_session_t *session, int *fd)
 	union sockaddr_union to;
 	union sockaddr_union server;
 	struct socket_info *send_socket;
+	struct tcp_conn_profile prof;
 
 	if (init_su(&to, &session->ip, session->port)) {
 		LM_ERR("error creating su from ipaddr and port\n");
@@ -807,7 +808,10 @@ static struct tcp_connection *smpp_connect(smpp_session_t *session, int *fd)
 		LM_ERR("error getting send socket\n");
 		return NULL;
 	}
-	return tcp_sync_connect(send_socket, &server, fd, 1);
+
+	tcp_con_get_profile(&server, &send_socket->su, PROTO_SMPP, &prof);
+
+	return tcp_sync_connect(send_socket, &server, &prof, fd, 1);
 }
 
 static int smpp_send_msg(smpp_session_t *smsc, str *buffer)
@@ -837,7 +841,7 @@ retry:
 	}
 	/* update connection in case it has changed */
 	ret = tsend_stream(fd, buffer->s, buffer->len, smpp_send_timeout);
-	tcp_conn_set_lifetime(conn, tcp_con_lifetime);
+	tcp_conn_reset_lifetime(conn);
 	if (ret < 0) {
 		LM_ERR("failed to send data!\n");
 		conn->state=S_CONN_BAD;
@@ -1547,7 +1551,7 @@ static int recv_smpp_msg(smpp_header_t *header, smpp_deliver_sm_t *body,
 
 	if (body->data_coding == SMPP_CODING_UCS2) {
 		memset(sms_body,0,2*MAX_SMS_CHARACTERS);
-		body_str.len = string2hex((unsigned char *)body->short_message,
+		body_str.len = string2hex((char *)body->short_message,
 		body->sm_length,sms_body);
 
 		body_str.s = sms_body;

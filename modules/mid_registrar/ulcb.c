@@ -222,10 +222,16 @@ static int unregister_record(urecord_t *r)
 	return send_unregister(from, to, ruri, callid, last_cseq, obp, ct);
 }
 
-void mid_reg_ct_event(void *binding, ul_cb_type type)
+void mid_reg_ct_event(void *binding, ul_cb_type type, ul_cb_extra *_)
 {
 	ucontact_t *c = (ucontact_t *)binding;
 	int_str_t *skip_dereg;
+
+	if (!is_mid_reg_domain(c->domain)) {
+		LM_DBG("skipping domain '%.*s', contact: '%.*s', cb: %d\n",
+		       c->domain->len, c->domain->s, c->c.len, c->c.s, type);
+		return;
+	}
 
 	LM_DBG("Contact callback (%d): contact='%.*s'\n", type, c->c.len, c->c.s);
 
@@ -240,10 +246,16 @@ void mid_reg_ct_event(void *binding, ul_cb_type type)
 	}
 }
 
-void mid_reg_aor_event(void *binding, ul_cb_type type)
+void mid_reg_aor_event(void *binding, ul_cb_type type, ul_cb_extra *_)
 {
 	urecord_t *r = (urecord_t *)binding;
 	int_str_t *skip_dereg;
+
+	if (!is_mid_reg_domain(r->domain)) {
+		LM_DBG("skipping domain '%.*s', aor: '%.*s', cb: %d\n",
+		       r->domain->len, r->domain->s, r->aor.len, r->aor.s, type);
+		return;
+	}
 
 	LM_DBG("AOR callback (%d): contact='%.*s'\n", type,
 	       r->aor.len, r->aor.s);

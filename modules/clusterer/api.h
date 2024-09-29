@@ -159,7 +159,7 @@ typedef void (*free_next_hop_f)(clusterer_node_t *next_hop);
  * This function will be called for:
  *   - every regular binary packet received;
  *   - every sync packet received;
- *   - all regular packets buffered during sync (@packet - list head).
+ *   - all regular packets buffered during sync.
  */
 typedef void (*cl_packet_cb_f)(bin_packet_t *packet);
 /*
@@ -183,7 +183,8 @@ typedef int (*register_capability_f)(str *cap, cl_packet_cb_f packet_cb,
 /*
  * Request to synchronize data for a given capability from another node.
  */
-typedef int (*request_sync_f)(str * capability, int cluster_id);
+typedef int (*request_sync_f)(str * capability, int cluster_id, int from_cb);
+
 /*
  * Returns a BIN packet in which to include a distinct "chunk" of data
  * (e.g. info about a single usrloc contact) to sync.
@@ -316,7 +317,7 @@ static inline int load_clusterer_api(struct clusterer_binds *binds) {
 }
 
 /* function used to add dependencies to clusterer module */
-static inline module_dependency_t *get_deps_clusterer(param_export_t *param)
+static inline module_dependency_t *get_deps_clusterer(const param_export_t *param)
 {
 	int cluster_id = *(int *)param->param_pointer;
 

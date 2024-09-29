@@ -601,7 +601,7 @@ int handle_subscribe(struct sip_msg* msg, int* force_active_param, str* tag)
 	reply_code= 500;
 	reply_str= pu_500_rpl;
 
-	if (tag) {
+	if (is_presence_cluster_enabled() && tag) {
 		subs.sh_tag = *tag;
 		if (c_api.shtag_get( &subs.sh_tag, pres_cluster_id)<0) {
 			LM_ERR("failed to lookup the <%.*s> sharing tag\n",
@@ -1074,6 +1074,7 @@ found_rec:
 			(s->record_route.len);
 		if(subs->record_route.s== NULL)
 		{
+			lock_release(&subs_htable[i].lock);
 			ERR_MEM(PKG_MEM_STR);
 		}
 		memcpy(subs->record_route.s, s->record_route.s, s->record_route.len);
@@ -1528,6 +1529,8 @@ void update_db_subs(db_con_t *db,db_func_t *dbf, shtable_t hash_table,
 
 	for(i=0; i<htable_size; i++)
 	{
+		subs_t *expired_subs = NULL;
+
 		if(!no_lock)
 			lock_get(&hash_table[i].lock);
 
@@ -1538,8 +1541,8 @@ void update_db_subs(db_con_t *db,db_func_t *dbf, shtable_t hash_table,
 		{
 			printf_subs(s);
 
-			/* delete from memory (only) whatever is expired, disregarding the
-			 * any clustering policy */
+			/* collect and later delete (from memory) expired subscriptions,
+			 * disregarding any clustering policy */
 			if(s->expires < (int)time(NULL))
 			{
 				LM_DBG("Found expired record\n");
@@ -1547,21 +1550,8 @@ void update_db_subs(db_con_t *db,db_func_t *dbf, shtable_t hash_table,
 				s= s->next;
 				prev_s->next= s;
 
-				if(!no_lock)
-					lock_release(&hash_table[i].lock);
-
-				/* if sharing tags (from clustering) are present, run the
-				 * del callback only if the subscription's tag is active */
-				if (sh_tags==NULL || del_s->sh_tag.len==0 ||
-				is_shtag_active( &del_s->sh_tag, sh_tags)) {
-					if (handle_expired_func(del_s)< 0)
-						LM_ERR("in function handle_expired_record\n");
-				}
-
-				free_subs(del_s);
-
-				if(!no_lock)
-					lock_get(&hash_table[i].lock);
+				del_s->next = expired_subs;
+				expired_subs = del_s;
 
 				continue;
 			}
@@ -1662,6 +1652,23 @@ void update_db_subs(db_con_t *db,db_func_t *dbf, shtable_t hash_table,
 		}
 		if(!no_lock)
 			lock_release(&hash_table[i].lock);
+
+		/* walk and delete all expired subscriptions */
+
+		while (expired_subs) {
+			del_s = expired_subs;
+			expired_subs = expired_subs->next;
+
+			/* if sharing tags (from clustering) are present, run the
+			 * del callback only if the subscription's tag is active */
+			if (sh_tags==NULL || del_s->sh_tag.len==0 ||
+			is_shtag_active( &del_s->sh_tag, sh_tags)) {
+				if (handle_expired_func(del_s)< 0)
+					LM_ERR("in function handle_expired_record\n");
+			}
+
+			free_subs(del_s);
+		}
 	}
 
 	/* now that all records were updated, delete whatever 
@@ -2203,6 +2210,8 @@ int refresh_watcher(str* pres_uri, str* watcher_uri, str* event,
 		}
 		s= s->next;
 	}
+
+	lock_release(&subs_htable[hash_code].lock);
 	return 0;
 }
 

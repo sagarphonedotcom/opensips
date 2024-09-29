@@ -68,6 +68,8 @@ static struct {
 	struct dict_object * Accounting_Record_Type;
 	struct dict_object * Acct_Session_Id;
 	struct dict_object * Event_Timestamp;
+	struct dict_object * Transaction_Id;
+	struct dict_object * Session_Id;
 
 	struct dict_object * Auth_Application_Id;
 	struct dict_object * Auth_Session_State;
@@ -169,6 +171,7 @@ static FILE *get_acc_log(void)
 		fd_log_debug("[ACC] opened %s for writing (append mode)", fpath);
 		if (!acc_log[acc_log_idx]) {
 			fd_log_error("[ACC] failed to open %s (%d: %s)\n", fpath, errno, strerror(errno));
+			pthread_mutex_unlock(&acc_rotate_lock);
 			return NULL;
 		}
 
@@ -247,16 +250,26 @@ static int acc_request( struct msg ** msg, struct avp * avp, struct session * se
 		fd_log_debug("Session: %.*s", (int)sl, s);
 
 		/* The AVPs that we copy in the answer */
+		CHECK_FCT( fd_msg_search_avp ( qry, dm_dict.Transaction_Id, &a) );
+		if (a) {
+			CHECK_FCT( fd_msg_avp_hdr( a, &h )  );
+			fd_log_debug("[ACC] Transaction-Id: %.*s",
+			        h->avp_value->os.len, h->avp_value->os.data);
+			CHECK_FCT( fd_msg_avp_new ( dm_dict.Transaction_Id, 0, &a ) );
+			CHECK_FCT( fd_msg_avp_setvalue( a, h->avp_value ) );
+			CHECK_FCT( fd_msg_avp_add( ans, MSG_BRW_LAST_CHILD, a ) );
+		}
+
 		CHECK_FCT( fd_msg_search_avp ( qry, dm_dict.Accounting_Record_Type, &a) );
 		if (a) {
 			CHECK_FCT( fd_msg_avp_hdr( a, &h )  );
-			fd_log_debug("Accounting-Record-Type: %d (%s)", h->avp_value->u32,
+			fd_log_debug("Accounting-Record-Type: %d (%s) %d %p", h->avp_value->u32,
 						/* it would be better to search this in the dictionary, but it is only for debug, so ok */
 						(h->avp_value->u32 == 1) ? "EVENT_RECORD" :
 						(h->avp_value->u32 == 2) ? "START_RECORD" :
 						(h->avp_value->u32 == 3) ? "INTERIM_RECORD" :
 						(h->avp_value->u32 == 4) ? "STOP_RECORD" :
-						"<unknown value>"
+						"<unknown value>", h->avp_value->os.len, h->avp_value->os.data
 					);
 			CHECK_FCT( fd_msg_avp_new ( dm_dict.Accounting_Record_Type, 0, &a ) );
 			CHECK_FCT( fd_msg_avp_setvalue( a, h->avp_value ) );
@@ -699,6 +712,8 @@ static int os_entry(char *confstring)
 	char *extra_avps_file;
 	int lib_mode;
 
+	CHECK_FCT(register_osips_avps());
+
 	CHECK_FCT(parse_conf_string(confstring, &extra_avps_file, &lib_mode));
 	CHECK_FCT(parse_extra_avps(extra_avps_file));
 	free(extra_avps_file);
@@ -706,13 +721,13 @@ static int os_entry(char *confstring)
 	if (lib_mode)
 		return 0;
 
-	CHECK_FCT(register_osips_avps());
-
 	/* Initialize the dictionary objects we use */
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Accounting-Record-Number", &dm_dict.Accounting_Record_Number, ENOENT) );
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Accounting-Record-Type", &dm_dict.Accounting_Record_Type, ENOENT) );
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Acct-Session-Id", &dm_dict.Acct_Session_Id, ENOENT) );
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Event-Timestamp", &dm_dict.Event_Timestamp, ENOENT) );
+	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Transaction-Id", &dm_dict.Transaction_Id, ENOENT) );
+	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Session-Id", &dm_dict.Session_Id, ENOENT) );
 
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Auth-Application-Id", &dm_dict.Auth_Application_Id, ENOENT) );
 	CHECK_FCT( fd_dict_search( fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME, "Auth-Session-State", &dm_dict.Auth_Session_State, ENOENT) );

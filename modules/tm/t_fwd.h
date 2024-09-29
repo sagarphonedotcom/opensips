@@ -51,9 +51,9 @@ int t_set_reason(struct sip_msg *msg, str *reason);
 
 int t_forward_ack( struct sip_msg* p_msg );
 
-void t_on_branch( unsigned int go_to );
+void t_on_branch( struct script_route_ref* go_to );
 
-unsigned int get_on_branch();
+struct script_route_ref *get_on_branch();
 
 typedef int (*tgetbranch_f)(void);
 int get_branch_index(void);
@@ -66,7 +66,7 @@ int t_inject_ul_event_branch(void);
 
 int t_inject_branch( struct cell *t, struct sip_msg *msg, int flags);
 
-int t_wait_no_more_branches( struct cell *t);
+int t_wait_no_more_branches( struct cell *t, int extra);
 
 void get_cancel_reason(struct sip_msg *msg, int flags, str *reason);
 

@@ -893,6 +893,14 @@ modparam("usrloc", "cseq_delay", 5)
    (addresses-of-record, contacts), organized into specific events
    (inserts, deletes or updates).
 
+   This OpenSIPS cluster exposes the "usrloc-contact-repl"
+   capability in order to mark nodes as eligible for becoming data
+   donors during an arbitrary sync request. Consequently, the
+   cluster must have at least one node marked with the "seed"
+   value as the clusterer.flags column/property in order to be
+   fully functional. Consult the clusterer - Capabilities chapter
+   for more details.
+
    Default value is 0 (replication disabled).
 
    More details on the user location distribution mechanisms are
@@ -1006,14 +1014,14 @@ modparam("usrloc", "latency_event_min_us_delta", 300000)
 1.5.39. pinging_mode (string)
 
    Depending on the cluster_mode, the module can perform contact
-   pinging using one of at most two possible heuristics:
+   pinging using one of two possible heuristics:
      * "ownership" - this instance will only attempt to ping a
        contact if it decides it is the logical owner of the
        contact. If a shared tag is attached to a contact, a node
        will keep sending pings to that contact as long as it owns
        the respective tag. If no shared tag has been specified for
        a given contact, the default is to assume permanent
-       ownership of the contact and always ping it.
+       ownership of the contact and ping it upon request.
      * "cooperation" - the assumption behind this pinging
        heuristic is that all user location cluster nodes are
        symmetrical (possibly front-ended by a SIP traffic
@@ -1120,17 +1128,19 @@ modparam("usrloc", "contact_refresh_timer", true)
    Adds a new contact for an user AOR.
 
    Parameters:
-     * table name - table where the contact will be added (Ex:
-       location).
-     * aor - user AOR in username[@domain] format (domain must be
-       supplied only if use_domain option is on).
-     * contact - contact string to be added
-     * expires - expires value of the contact
-     * q - Q value of the contact
-     * unused - unused attribute (kept for backword compatibility)
-     * flags - internal USRLOC flags of the contact
-     * cflags - per branch flags of the contact
-     * methods - mask with supported requests of the contact
+     * table name (string) - table where the contact will be added
+       (Ex: "location").
+     * aor (string) - user AOR in username[@domain] format (domain
+       must be supplied only if use_domain option is on).
+     * contact (string) - Contact URI to be added
+     * expires (int) - expires value of the contact
+     * q (string) - Q value of the contact
+     * flags (int) - internal USRLOC flags of the contact
+     * cflags (int) - per branch flags of the contact
+     * methods (int) - bitmask with supported requests of the
+       contact. To whitelist all SIP methods, simply use the value
+       32767. For a breakdown of each method's value, see the
+       "request_method" internal enum.
 
 1.7.6.  ul_show_contact
 
@@ -1158,7 +1168,8 @@ modparam("usrloc", "contact_refresh_timer", true)
 
 1.7.8.  ul_cluster_sync
 
-   This command will only take effect if the module is running
+   This command will only take effect if the target OpenSIPS
+   instance is paired with a hot backup instance, while running
    under a cluster-enabled working_mode_preset.
 
    The current node will locate a healthy donor node within the
@@ -1250,8 +1261,8 @@ modparam("usrloc", "contact_refresh_timer", true)
        string is options, if missing in the contact, the event
        will push the empty string for this event field.
      * latency - The latency of the last successful ping for this
-       contact. Until the first ping reply for a given contact
-       arrives, its pinging latency will be 0.
+       contact, in microseconds. Until the first ping reply for a
+       given contact arrives, its pinging latency will be 0.
      * shtag - The shared tag of the contact, which helps
        determine if the current node owns the contact (e.g.
        possibly using the $cluster.sh_tag pseudo-variable in order
@@ -1577,23 +1588,23 @@ Chapter 3. Contributors
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
    1. Jan Janak (@janakj) 410 117 15689 10095
-   2. Liviu Chircu (@liviuchircu) 331 195 9138 3681
-   3. Bogdan-Andrei Iancu (@bogdan-iancu) 242 148 4208 3614
-   4. Daniel-Constantin Mierla (@miconda) 40 29 544 308
-   5. Ionut Ionita (@ionutrazvanionita) 40 24 1099 413
-   6. Vlad Patrascu (@rvlad-patrascu) 40 22 787 651
+   2. Liviu Chircu (@liviuchircu) 343 207 9204 3727
+   3. Bogdan-Andrei Iancu (@bogdan-iancu) 245 150 4232 3624
+   4. Vlad Patrascu (@rvlad-patrascu) 43 25 794 661
+   5. Daniel-Constantin Mierla (@miconda) 40 29 544 308
+   6. Ionut Ionita (@ionutrazvanionita) 40 24 1099 413
    7. Jiri Kuthan (@jiriatipteldotorg) 35 25 975 120
-   8. Razvan Crainea (@razvancrainea) 28 22 380 121
+   8. Razvan Crainea (@razvancrainea) 31 24 427 159
    9. Henning Westerholt (@henningw) 21 11 462 356
-   10. Andrei Pelinescu-Onciul 17 13 151 91
+   10. Maksym Sobolyev (@sobomax) 18 12 339 154
 
-   All remaining contributors: Vlad Paiu (@vladpaiu), Maksym
-   Sobolyev (@sobomax), Walter Doekes (@wdoekes), Nils Ohlmeier,
-   Eseanu Marius Cristian (@eseanucristian), Ovidiu Sas
-   (@ovidiusas), Ionel Cerghit (@ionel-cerghit), Andrei Dragus,
-   Anca Vamanu, Alessio Garzi (@Ozzyboshi), Zero King (@l2dy),
-   Dusan Klinec (@ph4r05), Andrei Datcu (@andrei-datcu), Juha
-   Heinanen (@juha-h), Marcus Hunger, Jamey Hicks, Peter Lemenkov
+   All remaining contributors: Andrei Pelinescu-Onciul, Vlad Paiu
+   (@vladpaiu), Walter Doekes (@wdoekes), Nils Ohlmeier, Eseanu
+   Marius Cristian (@eseanucristian), Ovidiu Sas (@ovidiusas),
+   Ionel Cerghit (@ionel-cerghit), Andrei Dragus, Anca Vamanu,
+   Alessio Garzi (@Ozzyboshi), Zero King (@l2dy), Dusan Klinec
+   (@ph4r05), Andrei Datcu (@andrei-datcu), Juha Heinanen
+   (@juha-h), Marcus Hunger, Jamey Hicks, Peter Lemenkov
    (@lemenkov), Andreas Granig, Shlomi Gutman, @jalung, Jeffrey
    Magder, Phil D'Amore, Norman Brandinger (@NormB), David
    Sanders, Konstantin Bokarius, Klaus Darilion, Iouri Kharon,
@@ -1621,20 +1632,20 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - Aug 2021
-   2.  Walter Doekes (@wdoekes)            Apr 2019 - May 2021
-   3.  Maksym Sobolyev (@sobomax)          Apr 2003 - Feb 2021
-   4.  Vlad Patrascu (@rvlad-patrascu)     Jul 2016 - May 2020
-   5.  Bogdan-Andrei Iancu (@bogdan-iancu) Mar 2002 - May 2020
-   6.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
-   7.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2020
-   8.  Alexey Vasilyev (@vasilevalex)      Dec 2019 - Dec 2019
-   9.  Razvan Crainea (@razvancrainea)     Jul 2011 - Sep 2019
-   10. Aron Podrigal (@ar45)               Aug 2019 - Aug 2019
+   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - Sep 2024
+   2.  Maksym Sobolyev (@sobomax)          Apr 2003 - Dec 2023
+   3.  Vlad Paiu (@vladpaiu)               Jun 2011 - Jul 2023
+   4.  Vlad Patrascu (@rvlad-patrascu)     Jul 2016 - Mar 2023
+   5.  Razvan Crainea (@razvancrainea)     Jul 2011 - Jan 2023
+   6.  Bogdan-Andrei Iancu (@bogdan-iancu) Mar 2002 - Feb 2022
+   7.  Walter Doekes (@wdoekes)            Apr 2019 - May 2021
+   8.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
+   9.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2020
+   10. Alexey Vasilyev (@vasilevalex)      Dec 2019 - Dec 2019
 
-   All remaining contributors: Alessio Garzi (@Ozzyboshi), Dan
-   Pascu (@danpascu), Shlomi Gutman, @jalung, Vlad Paiu
-   (@vladpaiu), Ionut Ionita (@ionutrazvanionita), Ionel Cerghit
+   All remaining contributors: Aron Podrigal (@ar45), Alessio
+   Garzi (@Ozzyboshi), Dan Pascu (@danpascu), Shlomi Gutman,
+   @jalung, Ionut Ionita (@ionutrazvanionita), Ionel Cerghit
    (@ionel-cerghit), Ovidiu Sas (@ovidiusas), Dusan Klinec
    (@ph4r05), Eseanu Marius Cristian (@eseanucristian), David
    Sanders, Andrei Datcu (@andrei-datcu), Stephane Alnet, Andrei

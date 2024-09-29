@@ -88,7 +88,7 @@ extern int is_tcp_main;
 /* module  tracing parameters */
 static int trace_is_on_tmp=0, *trace_is_on;
 static char* trace_filter_route;
-static int trace_filter_route_id = -1;
+static struct script_route_ref *trace_filter_route_ref = NULL;
 /**/
 
 static int mod_init(void);
@@ -111,11 +111,12 @@ static mi_response_t *ws_trace_mi_1(const mi_params_t *params,
 static int ws_port = WS_DEFAULT_PORT;
 
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_ws_init, {{0,0,0}},0},
+	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	/* XXX: should we drop the ws prefix? */
 	{ "ws_port",           INT_PARAM, &ws_port           },
 	{ "ws_max_msg_chunks", INT_PARAM, &ws_max_msg_chunks },
@@ -129,7 +130,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -139,7 +140,7 @@ static dep_export_t deps = {
 	},
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "ws_trace", 0, 0, 0, {
 		{ws_trace_mi, {0}},
 		{ws_trace_mi_1, {"trace_mode", 0}},
@@ -229,9 +230,9 @@ static int mod_init(void)
 
 	*trace_is_on = trace_is_on_tmp;
 	if ( trace_filter_route ) {
-		trace_filter_route_id =
-			get_script_route_ID_by_name( trace_filter_route, 
-				sroutes->request, RT_NO);
+		trace_filter_route_ref =
+			ref_script_route_by_name( trace_filter_route, 
+				sroutes->request, RT_NO, REQUEST_ROUTE, 0);
 	}
 
 	return 0;
@@ -255,7 +256,7 @@ static int ws_conn_init(struct tcp_connection* c)
 		d->dest = t_dst;
 		d->net_trace_proto_id = net_trace_proto_id;
 		d->trace_is_on = trace_is_on;
-		d->trace_route_id = trace_filter_route_id;
+		d->trace_route_ref = trace_filter_route_ref;
 	}
 
 	d->state = WS_CON_INIT;
@@ -331,15 +332,16 @@ static int proto_ws_send(struct socket_info* send_sock,
 		unsigned int id)
 {
 	struct tcp_connection *c;
+	struct tcp_conn_profile prof;
 	struct timeval get;
 	struct ip_addr ip;
-	int port = 0;
-	int fd, n;
-
 	struct ws_data* d;
+	int port = 0, fd, n, matched;
 
-	reset_tcp_vars(tcpthreshold);
-	start_expire_timer(get,tcpthreshold);
+	matched = tcp_con_get_profile(to, &send_sock->su, send_sock->proto, &prof);
+
+	reset_tcp_vars(prof.send_threshold);
+	start_expire_timer(get,prof.send_threshold);
 
 	if (to){
 		su2ip_addr(&ip, to);
@@ -349,29 +351,29 @@ static int proto_ws_send(struct socket_info* send_sock,
 		n = tcp_conn_get(id, 0, 0, PROTO_NONE, NULL, &c, &fd, NULL);
 	}else{
 		LM_CRIT("prot_tls_send called with null id & to\n");
-		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+		get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 		return -1;
 	}
 
 	if (n<0) {
 		/* error during conn get, return with error too */
 		LM_ERR("failed to acquire connection\n");
-		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+		get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 		return -1;
 	}
 
 	/* was connection found ?? */
 	if (c==0) {
-		if (tcp_no_new_conn) {
+		if ((matched && prof.no_new_conn) || (!matched && tcp_no_new_conn))
 			return -1;
-		}
+
 		if (!to) {
 			LM_ERR("Unknown destination - cannot open new ws connection\n");
 			return -1;
 		}
 		LM_DBG("no open tcp connection found, opening new one\n");
 		/* create tcp connection */
-		if ((c=ws_connect(send_sock, to, &fd))==0) {
+		if ((c=ws_connect(send_sock, to, &prof, &fd))==0) {
 			LM_ERR("connect failed\n");
 			return -1;
 		}
@@ -391,7 +393,7 @@ static int proto_ws_send(struct socket_info* send_sock,
 
 		goto send_it;
 	}
-	get_time_difference(get, tcpthreshold, tcp_timeout_con_get);
+	get_time_difference(get, prof.send_threshold, tcp_timeout_con_get);
 
 	/* now we have a connection, let's what we can do with it */
 	/* BE CAREFUL now as we need to release the conn before exiting !!! */
@@ -406,8 +408,8 @@ send_it:
 	LM_DBG("sending via fd %d...\n",fd);
 
 	n = ws_req_write(c, fd, buf, len);
-	stop_expire_timer(get, tcpthreshold, "WS ops",buf,(int)len,1);
-	tcp_conn_set_lifetime( c, tcp_con_lifetime);
+	stop_expire_timer(get, prof.send_threshold, "WS ops",buf,(int)len,1);
+	tcp_conn_reset_lifetime(c);
 
 	LM_DBG("after write: c= %p n=%d fd=%d\n",c, n, fd);
 	if (n<0){

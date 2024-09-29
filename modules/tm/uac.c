@@ -56,6 +56,7 @@
 #include "../../action.h"
 #include "../../dset.h"
 #include "../../data_lump.h"
+#include "../../parser/parse_methods.h"
 
 #include "ut.h"
 #include "h_table.h"
@@ -176,6 +177,12 @@ static int run_local_route( struct cell *new_cell, char **buf, int *buf_len,
 	int buf_len1, sip_msg_len;
 	str h_to, h_from, h_cseq, h_callid;
 
+	/* do not build buffer if callbacks are not needed and
+	 * there are no local routes */
+	if (!has_tran_tmcbs(new_cell, TMCB_LOCAL_REQUEST_OUT) &&
+			!sroutes->local.a)
+		return 0;
+
 	LM_DBG("building sip_msg from buffer\n");
 	sipmsg_buf = *buf; /* remember the buffer used to get the sip_msg */
 	req = buf_to_sip_msg( *buf, *buf_len, dialog);
@@ -192,7 +199,12 @@ static int run_local_route( struct cell *new_cell, char **buf, int *buf_len,
 
 	/* run the route */
 	swap_route_type( backup_route_type, LOCAL_ROUTE);
-	run_top_route( sroutes->local, req);
+	if (sroutes && sroutes->local.a)
+		run_top_route( sroutes->local, req);
+	if (has_tran_tmcbs(new_cell, TMCB_LOCAL_REQUEST_OUT) ) {
+		run_trans_callbacks(TMCB_LOCAL_REQUEST_OUT, new_cell,
+			req, 0, 0);
+	}
 	set_route_type( backup_route_type );
 
 	/* transfer current message context back to t */
@@ -207,7 +219,8 @@ static int run_local_route( struct cell *new_cell, char **buf, int *buf_len,
 	if (req->new_uri.s || req->force_send_socket!=dialog->send_sock ||
 	req->dst_uri.len != dialog->hooks.next_hop->len ||
 	memcmp(req->dst_uri.s,dialog->hooks.next_hop->s,req->dst_uri.len) ||
-	(dst_changed=0)!=0 || req->add_rm || should_update_sip_body(req)) {
+	(dst_changed=0)!=0 || req->add_rm || should_update_sip_body(req)
+	|| req->msg_flags&FL_FORCE_LOCAL_RPORT) {
 
 		/* stuff changed in the request, we may need to rebuild, so let's
 		 * evaluate the changes first, mainly if the destination changed */
@@ -218,7 +231,7 @@ static int run_local_route( struct cell *new_cell, char **buf, int *buf_len,
 			/* calculate the socket corresponding to next hop */
 			new_proxy = uri2proxy(
 				req->dst_uri.s ? &(req->dst_uri) : &req->new_uri,
-				PROTO_NONE );
+				req->force_send_socket?req->force_send_socket->proto:PROTO_NONE);
 			if (new_proxy==0)
 				goto skip_update;
 			/* use the first address */
@@ -226,18 +239,31 @@ static int run_local_route( struct cell *new_cell, char **buf, int *buf_len,
 				&new_proxy->host, new_proxy->addr_idx,
 				new_proxy->port ? new_proxy->port:SIP_PORT);
 			/* get the send socket */
-			new_send_sock = get_send_socket( req, &new_to_su,
-				new_proxy->proto);
-			if (new_send_sock==NULL) {
-				free_proxy( new_proxy );
-				pkg_free( new_proxy );
-				LM_ERR("no socket found for the new destination\n");
-					goto skip_update;
+			if (req->force_send_socket) {
+				new_send_sock = req->force_send_socket;
+			} else if (dialog->pref_sock &&
+			dialog->pref_sock->proto==new_proxy->proto) {
+				new_send_sock = dialog->pref_sock;
+			} else {
+				new_send_sock = get_send_socket( req, &new_to_su,
+					new_proxy->proto);
+				if (new_send_sock==NULL) {
+					free_proxy( new_proxy );
+					pkg_free( new_proxy );
+					LM_ERR("no socket found for the new destination\n");
+						goto skip_update;
+				}
 			}
 		}
 
-		/* if interface change, we need to re-build the via */
-		if (new_send_sock && new_send_sock != dialog->send_sock) {
+		/* if interface change or new VIA related flags were added,
+		 * we need to re-build the via */
+		if ( (new_send_sock && new_send_sock != dialog->send_sock)
+		|| (req->msg_flags&FL_FORCE_LOCAL_RPORT &&
+		/* coding hack to get the new_send_sock set if FL_FORCE_LOCAL_RPORT
+		 * was set (note that new_send_sock gets set only if destination was
+		 * changed, which is not the case here) */
+		(new_send_sock=dialog->send_sock)!=NULL) ) {
 
 			LM_DBG("Interface change in local route -> "
 				"rebuilding via\n");
@@ -393,8 +419,9 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 	char *buf;
 	int buf_len;
 	int ret, flags;
-	unsigned int hi;
+	unsigned int hi, method_id;
 	struct proxy_l *proxy;
+	struct tm_callback *it;
 
 	ret=-1;
 
@@ -410,7 +437,8 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 	LM_DBG("next_hop=<%.*s>\n",dialog->hooks.next_hop->len,
 			dialog->hooks.next_hop->s);
 
-	/* calculate the socket corresponding to next hop */
+	/* calculate the socket corresponding to next hop ; here we take
+	 * into consideration the protocol forced by the "send_sock" */
 	proxy = uri2proxy( dialog->hooks.next_hop,
 		dialog->send_sock ? dialog->send_sock->proto : PROTO_NONE );
 	if (proxy==0)  {
@@ -429,12 +457,18 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 			dialog->send_sock = NULL;
 	}
 	if (dialog->send_sock==NULL) {
-		/* get the send socket */
-		dialog->send_sock = get_send_socket(NULL/*msg*/, &to_su, proxy->proto);
-		if (!dialog->send_sock) {
-			LM_ERR("no corresponding socket for af %d\n", to_su.s.sa_family);
-			ser_error = E_NO_SOCKET;
-			goto error3;
+		if (dialog->pref_sock && proxy->proto == dialog->pref_sock->proto) {
+			dialog->send_sock = dialog->pref_sock;
+		} else {
+			/* get the send socket */
+			dialog->send_sock = get_send_socket(NULL/*msg*/, &to_su,
+				proxy->proto);
+			if (!dialog->send_sock) {
+				LM_ERR("no corresponding socket for af %d\n",
+					to_su.s.sa_family);
+				ser_error = E_NO_SOCKET;
+				goto error3;
+			}
 		}
 	}
 	LM_DBG("sending socket is %.*s \n",
@@ -452,6 +486,11 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 	 * we might need it later for accessing dialog specific info */
 	if (dialog->dialog_ctx)
 		new_cell->dialog_ctx = dialog->dialog_ctx;
+	if (has_new_local_tmcbs()) {
+		if (parse_method(method->s, method->s + method->len, &method_id) == NULL)
+			method_id = METHOD_UNDEF;
+		run_new_local_callbacks(new_cell, NULL, method_id);
+	}
 
 	/* pass the transaction flags from dialog to transaction */
 	new_cell->flags |= dialog->T_flags;
@@ -505,11 +544,9 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 	}
 
 	/* run the local route */
-	if (sroutes==NULL) {
+	if (sroutes==NULL)
 		LM_BUG("running local route/t_uac, but no routes in the process\n");
-	} else if (sroutes->local.a) {
-		run_local_route( new_cell, &buf, &buf_len, dialog, &req, &buf_req);
-	}
+	run_local_route( new_cell, &buf, &buf_len, dialog, &req, &buf_req);
 
 	if (request->buffer.s==NULL) {
 		request->buffer.s = buf;
@@ -540,11 +577,13 @@ int t_uac(str* method, str* headers, str* body, dlg_t* dialog,
 	if (new_cell->uac[0].br_flags & tcp_no_new_conn_bflag)
 		tcp_no_new_conn = 1;
 
+	set_bavp_list(&new_cell->uac[0].user_avps);
 	if (SEND_BUFFER(request) == -1) {
 		LM_ERR("attempt to send to '%.*s' failed\n",
 			dialog->hooks.next_hop->len,
 			dialog->hooks.next_hop->s);
 	}
+	reset_bavp_list();
 
 	tcp_no_new_conn = 0;
 
@@ -582,6 +621,15 @@ error1:
 	remove_from_hash_table_unsafe(new_cell);
 	UNLOCK_HASH(hi);
 error2:
+	/* if we set a callback, prevent any eventual release function to run
+	 * and let the upper layer to take care of distoying the callback params
+	 * or any resources it passed here. */
+	if (cb && release_func)
+		for(it=new_cell->tmcb_hl.first ; it ; it=it->next)
+			if (it->callback==cb) {
+				it->release=NULL;
+				break;
+			}
 	free_cell(new_cell);
 error3:
 	free_proxy( proxy );

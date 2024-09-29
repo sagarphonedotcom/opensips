@@ -69,6 +69,8 @@ typedef struct __str_const str_const;
 /* str initialization */
 #define STR_NULL (str){NULL, 0}
 #define STR_NULL_const (str_const){NULL, 0}
+#define STR_EMPTY ((str){"", 0})
+#define STR_EMPTY_const ((str_const){"", 0})
 #define str_init(_string)  (str){_string, sizeof(_string) - 1}
 #define str_const_init(_string)  (str_const){_string, sizeof(_string) - 1}
 
@@ -114,5 +116,11 @@ static inline str *str_cpy(str *dest, const str *src)
  * and return const pointer to it.
  */
 #define const_str(sbuf) ({static const str_const _stc = str_const_init(sbuf); &_stc;})
+
+/**
+ * Initialize private static str given the static buffer
+ * and return const pointer to it.
+ */
+#define str_static(sbuf) ({static const str _stc = str_init(sbuf); &_stc;})
 
 #endif

@@ -49,7 +49,7 @@ int xlog_buf_size = 4096;
 int xlog_force_color = 0;
 
 /* the log level used when printing xlog messages */
-int xlog_print_level = L_ERR;
+int xlog_print_level = L_NOTICE;
 
 /* the logging level/threshold for filtering the xlog messages for printing */
 static int xlog_level_default = L_NOTICE;
@@ -204,7 +204,8 @@ static inline void add_xlog_data(trace_message message, void* param)
 
 	tprot.add_payload_part( message, "text", &xtrace_param->buf);
 
-	tprot.add_extra_correlation( message, &sip_str, &xtrace_param->msg->callid->body );
+	if (xtrace_param->msg && xtrace_param->msg->callid)
+		tprot.add_extra_correlation( message, &sip_str, &xtrace_param->msg->callid->body );
 }
 
 static inline int trace_xlog(struct sip_msg* msg, char* buf, int len)
@@ -317,15 +318,13 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
 int xlog_1(struct sip_msg* msg, char* frm)
 {
 	int log_len, ret;
-	pv_elem_t _frm;
 
 	if(!is_xlog_printable(xlog_print_level))
 		return 1;
 
 	log_len = xlog_buf_size;
 
-	memcpy(&_frm, frm, sizeof(pv_elem_t));
-	ret = xl_print_log(msg, &_frm, &log_len);
+	ret = xl_print_log(msg, (pv_elem_t*)(void*)frm, &log_len);
 	if (ret == -1) {
 		LM_ERR("global print buffer too small, increase 'xlog_buf_size'\n");
 		return -1;
@@ -347,15 +346,13 @@ int xlog_1(struct sip_msg* msg, char* frm)
 int xdbg(struct sip_msg* msg, char* frm)
 {
 	int log_len, ret;
-	pv_elem_t _frm;
 
 	if(!is_xlog_printable(L_DBG))
 		return 1;
 
 	log_len = xlog_buf_size;
 
-	memcpy(&_frm, frm, sizeof(pv_elem_t));
-	ret = xl_print_log(msg, &_frm, &log_len);
+	ret = xl_print_log(msg, (pv_elem_t*)(void*)frm, &log_len);
 	if (ret == -1) {
 		LM_ERR("global print buffer too small, increase 'xlog_buf_size'\n");
 		return -1;
@@ -448,7 +445,7 @@ int pv_get_color(struct sip_msg *msg, pv_param_t *param,
 	char* end;
 	str s;
 
-	if(log_stderr==0 && xlog_force_color==0)
+	if(xlog_force_color==0)
 	{
 		s.s = "";
 		s.len = 0;

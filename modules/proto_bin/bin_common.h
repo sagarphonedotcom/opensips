@@ -56,7 +56,7 @@ static inline int bin_handle_req(struct tcp_req *req,
 
 	if (req->complete){
 		/* update the timeout - we successfully read the request */
-		tcp_conn_set_lifetime( con, tcp_con_lifetime);
+		tcp_conn_reset_lifetime(con);
 		con->timeout = con->lifetime;
 
 		LM_DBG("completely received a message\n");
@@ -89,7 +89,8 @@ static inline int bin_handle_req(struct tcp_req *req,
 		if (!size && req != &_bin_common_current_req) {
 			/* if we no longer need this tcp_req
 			 * we can free it now */
-			pkg_free(req);
+			shm_free(req);
+			con->con_req = NULL;
 		}
 
 		con->msg_attempts = 0;
@@ -121,7 +122,7 @@ static inline int bin_handle_req(struct tcp_req *req,
 			/* let's duplicate this - most likely another conn will come in */
 
 			LM_DBG("We didn't manage to read a full request\n");
-			con->con_req = pkg_malloc(sizeof(struct tcp_req));
+			con->con_req = shm_malloc(sizeof(struct tcp_req));
 			if (con->con_req == NULL) {
 				LM_ERR("No more mem for dynamic con request buffer\n");
 				goto error;
@@ -152,3 +153,5 @@ error:
 	/* report error */
 	return -1;
 }
+
+#define TRANS_TRACE_PROTO_ID "net"

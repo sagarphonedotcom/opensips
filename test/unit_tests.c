@@ -24,6 +24,7 @@
 
 #include "../cachedb/test/test_cachedb.h"
 #include "../lib/test/test_csv.h"
+#include "../lib/test/test_digest_auth.h"
 #include "../parser/test/test_parser.h"
 #include "../mem/test/test_malloc.h"
 #include "test_ut.h"
@@ -58,11 +59,14 @@ int run_unit_tests(void)
 
 	/* core tests */
 	if (!strcmp(testing_module, "core")) {
+		/* remember to update the Makefile.test OpenSIPS command-line with at
+		 * least "-m2048 -M128" before stress-testing any of the allocators! */
 		//test_malloc();
 		test_cachedb();
 		test_lib_csv();
 		test_parser();
 		test_ut();
+		test_lib_digest_auth();
 
 	/* module tests */
 	} else {

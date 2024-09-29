@@ -231,6 +231,18 @@ static inline int btostr( char *p,  unsigned char val)
 	return i;
 }
 
+static inline int rctostr( char *p,  unsigned int val)
+{
+	unsigned int a,b,i =0;
+
+	if ( (a=val/100)!=0 )
+		*(p+(i++)) = a+'0';         /*first digit*/
+	if ( (b=val%100/10)!=0 || a)
+		*(p+(i++)) = b+'0';        /*second digit*/
+	*(p+(i++)) = '0'+val%10;              /*third digit*/
+
+	return i;
+}
 
 /* 2^64~= 16*10^18 => 19+1+1 sign + digits + \0 */
 #define INT2STR_MAX_LEN  (1+19+1+1)
@@ -259,13 +271,15 @@ static inline char* int2bstr(uint64_t l, char *s, int* len)
 /* INTeger-TO-STRing : convers a 64-bit integer to a string
  * returns a pointer to a static buffer containing l in asciiz & sets len */
 #define INT2STR_BUF_NO    7
+extern unsigned int int2str_buf_index;
 extern char int2str_buf[INT2STR_BUF_NO][INT2STR_MAX_LEN];
+static inline unsigned int getstrbufindex(void) {
+	return ((int2str_buf_index++) % INT2STR_BUF_NO);
+}
+
 static inline char* int2str(uint64_t l, int* len)
 {
-	static unsigned int it = 0;
-
-	if ((++it)==INT2STR_BUF_NO) it = 0;
-	return int2bstr( l, int2str_buf[it], len);
+	return int2bstr( l, int2str_buf[getstrbufindex()], len);
 }
 
 
@@ -291,9 +305,9 @@ static inline char* sint2str(long l, int* len)
 
 static inline char* double2str(double d, int* len)
 {
-	static int buf;
+	unsigned int buf;
 
-	buf = (buf + 1) % INT2STR_BUF_NO;
+	buf = getstrbufindex();
 	*len = snprintf(int2str_buf[buf], INT2STR_MAX_LEN - 1, "%0.*lf",
 	                FLOATING_POINT_PRECISION, d);
 	int2str_buf[buf][*len] = '\0';
@@ -433,7 +447,7 @@ inline static int hexstr2int(char *c, int len, unsigned int *val)
 
 /* double output length assumed ; does NOT zero-terminate */
 inline static int string2hex(
-	/* input */ unsigned char *str, int len,
+	/* input */ const char *str, int len,
 	/* output */ char *hex )
 {
 	int orig_len;
@@ -598,7 +612,8 @@ static inline void unescape_crlf(str *in_out)
 	}
 }
 
-static inline int _is_e164(const str* _user, int require_plus)
+/* @max_digits should be just 15, but there are exceptions to this rule! */
+static inline int _is_e164(const str* _user, int require_plus, int max_digits)
 {
 	char *d, *start, *end;
 
@@ -614,7 +629,7 @@ static inline int _is_e164(const str* _user, int require_plus)
 	}
 
 	end = _user->s + _user->len;
-	if (end - start < 2 || end - start > 15)
+	if (end - start < 2 || end - start > max_digits)
 		return -1;
 
 	for (d = start; d < end; d++)
@@ -623,7 +638,7 @@ static inline int _is_e164(const str* _user, int require_plus)
 
 	return 1;
 }
-#define is_e164(_user) _is_e164(_user, 1)
+#define is_e164(_user) _is_e164(_user, 1, 15)
 
 /*
  * Convert a string to lower case
@@ -758,20 +773,24 @@ static inline int strno2int(const str *val, unsigned int *mask )
 
 /*
  * Make a copy of a str structure using shm_malloc
+ *
+ * Return: 0 on success, -1 on failure
  */
-static inline int shm_str_dup(str* dst, const str* src)
-{
-	dst->s = shm_malloc(src->len);
-	if (!dst->s) {
-		LM_ERR("no shared memory left\n");
-		dst->len = 0;
-		return -1;
-	}
-
-	memcpy(dst->s, src->s, src->len);
-	dst->len = src->len;
-	return 0;
-}
+#define shm_str_dup(/* str* */_dst_, /* str* */_src_) \
+	({ \
+		int __ret__; \
+		(_dst_)->s = shm_malloc((_src_)->len); \
+		if (!(_dst_)->s) { \
+			LM_ERR("no shared memory left\n"); \
+			(_dst_)->len = 0; \
+			__ret__ = -1; \
+		} else { \
+			memcpy((_dst_)->s, (_src_)->s, (_src_)->len); \
+			(_dst_)->len = (_src_)->len; \
+			__ret__ = 0; \
+		} \
+	 __ret__; \
+	 })
 
 
 /*
@@ -789,7 +808,7 @@ static inline int shm_nt_str_dup(str* dst, const str* src)
 		return 0;
 	}
 
-	dst->s = shm_malloc(src->len + 1);
+	dst->s = shm_malloc(_src.len + 1);
 	if (!dst->s) {
 		LM_ERR("no shared memory left\n");
 		dst->len = 0;
@@ -855,50 +874,49 @@ static inline char *shm_strdup(const char *str)
  *
  * Return: 0 on success, -1 on failure
  */
-static inline int shm_str_extend(str *in, int size)
-{
-	char *p;
-
-	/* do not check for !in->s here, as it's better
-	 * to crash sooner on a corrupt @in string (e.g. {NULL, 172}) */
-	if (in->len < size) {
-		p = shm_realloc(in->s, size);
-		if (!p) {
-			LM_ERR("oom\n");
-			return -1;
-		}
-
-		in->s = p;
-		in->len = size;
-	}
-
-	return 0;
-}
+#define shm_str_extend(/* str* */_in_, /* int */_size_) \
+	({ \
+		int __ret__ = 0; \
+		/* do not check for !in->s here, as it's better \
+		 * to crash sooner on a corrupt @in string (e.g. {NULL, 172}) */ \
+		if ((_in_)->len < (_size_)) { \
+			char *_p_ = shm_realloc((_in_)->s, _size_); \
+			if (!_p_) { \
+				LM_ERR("oom\n"); \
+				__ret__ = -1; \
+			} else { \
+				(_in_)->s = _p_; \
+				(_in_)->len = _size_; \
+			} \
+		} \
+		__ret__; \
+	 })
 
 
 /*
  * Ensure "dst" matches the content of "src" without leaking memory
  *
  * Note: if you just want to dup a string, use "shm_str_dup()" instead
+ * Return: 0 on success, -1 on failure
  */
-static inline int shm_str_sync(str* dst, const str* src)
-{
-	if (ZSTRP(src)) {
-		if (dst->s)
-			shm_free(dst->s);
-		memset(dst, 0, sizeof *dst);
-		return 0;
-	}
-
-	if (shm_str_extend(dst, src->len) != 0) {
-		LM_ERR("oom\n");
-		return -1;
-	}
-
-	memcpy(dst->s, src->s, src->len);
-	dst->len = src->len;
-	return 0;
-}
+#define shm_str_sync(/* str* */_dst_, /* str* */_src_) \
+	({ \
+		int __ret__; \
+		if ((str *)(_src_) == (str *)NULL || !(_src_)->s || (_src_)->len == 0) { \
+			if ((_dst_)->s) \
+				shm_free((_dst_)->s); \
+			memset((_dst_), 0, sizeof *(_dst_)); \
+			__ret__ = 0; \
+		} else if (shm_str_extend(_dst_, (_src_)->len) != 0) { \
+			LM_ERR("oom\n"); \
+			__ret__ = -1; \
+		} else { \
+			memcpy((_dst_)->s, (_src_)->s, (_src_)->len); \
+			(_dst_)->len = (_src_)->len; \
+			__ret__ = 0; \
+		} \
+	__ret__; \
+	})
 
 
 static inline void shm_str_clean(str* dst)
@@ -907,7 +925,6 @@ static inline void shm_str_clean(str* dst)
 		shm_free(dst->s);
 	memset(dst, 0, sizeof *dst);
 }
-
 
 /*
  * Make a copy of a str structure using pkg_malloc
@@ -963,6 +980,32 @@ static inline int pkg_str_extend(str *in, int size)
 	return 0;
 }
 
+/*
+ * Ensure "dst" matches the content of "src" without leaking memory
+ *
+ * Note: if you just want to dup a string, use "pkg_str_dup()" instead
+ */
+static inline int pkg_str_sync(str* dst, const str* src)
+{
+	if (ZSTRP(src)) {
+		if (dst->s)
+			pkg_free(dst->s);
+		memset(dst, 0, sizeof *dst);
+		return 0;
+	}
+
+	if (pkg_str_extend(dst, src->len) != 0) {
+		LM_ERR("oom\n");
+		return -1;
+	}
+
+	memcpy(dst->s, src->s, src->len);
+	dst->len = src->len;
+	return 0;
+}
+
+
+
 
 /*
  * test if two str's are equal
@@ -997,7 +1040,7 @@ static inline int _str_casematchCC(const str_const *a, const str_const *b)
 	p = a->s;
 	q = b->s;
 
-	if (p == q)
+	if (p == q || a->len == 0)
 		return 1;
 
 	end = p + a->len;
@@ -1119,6 +1162,48 @@ static inline char* str_strstr(const str *stra, const str *strb)
 
 		for (i=1; i<strb->len; i++)
 			if (stra->s[len+i]!=strb->s[i]) {
+				len++;
+				break;
+			}
+
+		if (i != strb->len)
+			continue;
+
+		return stra->s+len;
+	}
+
+
+	return NULL;
+}
+
+/*
+ * search @strb in @stra ignoring case of both, return pointer to 1st occurrence
+ */
+static inline char* str_strcasestr(const str *stra, const str *strb)
+{
+	int i;
+	int len;
+
+	if (stra==NULL || strb==NULL || stra->s==NULL || strb->s==NULL
+			|| stra->len<=0 || strb->len<=0) {
+#ifdef EXTRA_DEBUG
+		LM_DBG("bad parameters\n");
+#endif
+		return NULL;
+	}
+
+	if (strb->len > stra->len)
+		return NULL;
+
+	len=0;
+	while (stra->len-len >= strb->len){
+		if (tolower(stra->s[len]) != tolower(strb->s[0])) {
+			len++;
+			continue;
+		}
+
+		for (i=1; i<strb->len; i++)
+			if (tolower(stra->s[len+i])!=tolower(strb->s[i])) {
 				len++;
 				break;
 			}
@@ -1258,19 +1343,46 @@ extern int tcp_timeout_send;
 			tcp_dbg = get_time_diff(&(begin)); \
 	} while(0)
 
-
+/* Note: limited to a max time diff of 2147 * 10^6 useconds! */
 static inline int get_time_diff(struct timeval *begin)
 {
 	struct timeval end;
-	long seconds,useconds,mtime;
 
-	gettimeofday(&end,NULL);
-	seconds  = end.tv_sec  - begin->tv_sec;
-	useconds = end.tv_usec - begin->tv_usec;
-	mtime = ((seconds) * 1000000 + useconds);
+	gettimeofday(&end, NULL);
 
-	return mtime;
+	/* difference is returned in microseconds */
+	return (long long)(end.tv_sec*1000000 + end.tv_usec)
+	         - (long long)(begin->tv_sec*1000000 + begin->tv_usec);
 }
+
+static inline unsigned long long get_clock_diff(struct timespec *begin)
+{
+    struct timespec end;
+
+    clock_gettime(CLOCK_REALTIME, &end);
+
+    return (end.tv_sec - begin->tv_sec) * 1000000000ULL
+             + (end.tv_nsec - begin->tv_nsec);
+}
+
+#define __clock_check_diff(__loglv__, start_tmspec, maxdf, fmt, ...) \
+	do { \
+		unsigned long long _diff_ns = get_clock_diff(start_tmspec); \
+		if (_diff_ns > (maxdf)) \
+			LM_GEN(__loglv__, "time spent: %0.*lfs " fmt "\n", 3, \
+			       (_diff_ns)/1e9, __VA_ARGS__); \
+	} while (0)
+#define _clock_check_diff(start_tmspec, maxdf, fmt, ...) \
+	__clock_check_diff(L_NOTICE, start_tmspec, maxdf, fmt, __VA_ARGS__)
+
+/**
+ * clock_check_diff() - measure code execution time relative to the @begin
+ *       timespec; print notice msg if the difference was exceeded
+ * @maxdf (unsigned long long) - the maximum accepted execution time
+ * @fmt (char *) - extra format string + variable # of arguments
+ */
+#define clock_check_diff(maxdf, fmt, ...) \
+	_clock_check_diff(&begin, maxdf, fmt, __VA_ARGS__)
 
 #define reset_longest_action_list(threshold) \
 	do { \
@@ -1438,7 +1550,7 @@ static inline void * l_memmem(const void *b1, const void *b2,
  * Note: makes use of a single, static buffer -- use accordingly!
  */
 char *db_url_escape(const str *url);
-static inline char *_db_url_escape(char *url)
+static inline char *_db_url_escape(const char *url)
 {
 	return db_url_escape(_str(url));
 }

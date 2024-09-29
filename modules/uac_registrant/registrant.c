@@ -35,6 +35,7 @@
 #include "../../parser/parse_authenticate.h"
 #include "../../parser/contact/parse_contact.h"
 #include "../../parser/parse_min_expires.h"
+#include "../../parser/parse_expires.h"
 #include "../uac_auth/uac_auth.h"
 #include "../../lib/digest_auth/digest_auth.h"
 #include "reg_records.h"
@@ -135,7 +136,7 @@ typedef struct reg_tm_cb {
 }reg_tm_cb_t;
 
 /** Exported parameters */
-static param_export_t params[]= {
+static const param_export_t params[]= {
 	{"hash_size",		INT_PARAM,			&reg_hsize},
 	{"default_expires",	INT_PARAM,			&default_expires},
 	{"timer_interval",	INT_PARAM,			&timer_interval},
@@ -159,7 +160,7 @@ static param_export_t params[]= {
 
 
 /** MI commands */
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "reg_list", 0, 0, 0, {
 		{mi_reg_list, {0}},
 		{mi_reg_list_record, {"aor", "contact", "registrar", 0}},
@@ -181,7 +182,7 @@ static mi_export_t mi_cmds[] = {
 	{EMPTY_MI_EXPORT}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm",       DEP_ABORT },
 		{ MOD_TYPE_DEFAULT, "uac_auth", DEP_ABORT },
@@ -292,7 +293,7 @@ static int mod_init(void)
 		register_timer("uac_reg_check", timer_check, (void*)(long)param, _timer,
 			TIMER_FLAG_DELAY_ON_DELAY);
 	} else {
-		LM_ERR("timer_interval=[%d] MUST be bigger then reg_hsize=[%d]\n",
+		LM_ERR("timer_interval=[%d] MUST be at least as big as reg_hsize=[%d]\n",
 			timer_interval, reg_hsize);
 		return -1;
 	}
@@ -354,6 +355,7 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 	str msg_body;
 	int statuscode = 0;
 	unsigned int exp = 0;
+	exp_body_t *header_exp = NULL;
 	unsigned int bindings_counter = 0;
 	reg_record_t *rec = (reg_record_t*)e_data;
 	struct hdr_field *c_ptr, *head_contact;
@@ -509,6 +511,15 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 				}
 			} else {
 				contact = contact->next;
+			}
+		}
+		// if there is no expires in contact, try parse expires from header
+		if (exp == 0 && msg->expires) {
+			if (parse_expires(msg->expires) < 0) {
+				LM_ERR("failed to parse Expires header\n");
+			} else {
+				header_exp = (exp_body_t*)msg->expires->parsed;
+				exp = header_exp->val;
 			}
 		}
 
@@ -811,14 +822,28 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	LM_DBG("extra_hdrs=[%p][%d]->[%.*s]\n",
 		extra_hdrs.s, extra_hdrs.len, extra_hdrs.len, extra_hdrs.s);
 
-	result=tmb.t_request_within(
-		&register_method,	/* method */
-		&extra_hdrs,		/* extra headers*/
-		NULL,			/* body */
-		&rec->td,		/* dialog structure*/
-		reg_tm_cback,		/* callback function */
-		(void *)cb_param,	/* callback param */
-		osips_shm_free);	/* function to release the parameter */
+	if ( !push_new_global_context() ) {
+
+		LM_ERR("failed to alloc new ctx in pkg\n");
+		result = 0;
+
+	} else {
+
+		/* reset the new to-be-used CTX */
+		memset( current_processing_ctx, 0, context_size(CONTEXT_GLOBAL) );
+
+		/* send the request within the new context */
+		result=tmb.t_request_within(
+			&register_method,	/* method */
+			&extra_hdrs,		/* extra headers*/
+			NULL,			/* body */
+			&rec->td,		/* dialog structure*/
+			reg_tm_cback,		/* callback function */
+			(void *)cb_param,	/* callback param */
+			osips_shm_free);	/* function to release the parameter */
+
+		pop_pushed_global_context();
+	}
 
 	if (result < 1)
 		shm_free(cb_param);

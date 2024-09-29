@@ -102,7 +102,7 @@ static int update_pua(ua_pres_t* p, unsigned int hash_code, unsigned int final);
 static void db_update(unsigned int ticks,void *param);
 static void hashT_clean(unsigned int ticks,void *param);
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"pua_update_contact",(cmd_function)update_contact, {{0,0,0}},
 		REQUEST_ROUTE},
 	{"bind_libxml_api", (cmd_function)bind_libxml_api, {{0,0,0}}, 0},
@@ -110,7 +110,7 @@ static cmd_export_t cmds[]={
 	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[]={
+static const param_export_t params[]={
 	{"hash_size" ,          INT_PARAM, &HASH_SIZE          },
 	{"db_url" ,             STR_PARAM, &db_url.s           },
 	{"db_table" ,           STR_PARAM, &db_table.s         },
@@ -122,7 +122,7 @@ static param_export_t params[]={
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_SQLDB, NULL, DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -214,8 +214,15 @@ static int mod_init(void)
 
 	if(HASH_SIZE<=1)
 		HASH_SIZE= 512;
-	else
+	else {
+		/* must fit in half of "long" when building the pres_id */
+		if ( HASH_SIZE > (sizeof(long)*8/2) ) {
+			LM_WARN("hash_size %d too large, limiting to max allowed %d\n",
+				HASH_SIZE, (int)(sizeof(long)*8/2) );
+			HASH_SIZE = (sizeof(long)*8/2);
+		}
 		HASH_SIZE = 1<<HASH_SIZE;
+	}
 
 	HashT= new_htable();
 	if(HashT== NULL)
@@ -867,16 +874,17 @@ error:
 static void db_update(unsigned int ticks,void *param)
 {
 	ua_pres_t* p= NULL;
-	db_key_t q_cols[19];
-	db_val_t q_vals[19];
+	db_key_t q_cols[20];
+	db_val_t q_vals[20];
 	db_key_t db_cols[5];
 	db_val_t db_vals[5];
 	db_op_t  db_ops[1] ;
 	int n_query_cols= 0, n_query_update= 0;
 	int n_update_cols= 0;
 	int i;
-	int puri_col,touri_col,pid_col,expires_col,flag_col,etag_col,tuple_col,event_col;
-	int watcher_col,callid_col,totag_col,fromtag_col,record_route_col,cseq_col;
+	int puri_col,touri_col,pid_col,expires_col,flag_col,etag_col,tuple_col;
+	int event_col, watcher_col, callid_col, totag_col, fromtag_col;
+	int record_route_col, cseq_col, shtag_col;
 	int no_lock= 0, contact_col, desired_expires_col, extra_headers_col;
 	int remote_contact_col, version_col;
 
@@ -972,6 +980,11 @@ static void db_update(unsigned int ticks,void *param)
 	q_cols[touri_col= n_query_cols] = &str_to_uri_col;
 	q_vals[touri_col].type = DB_STR;
 	q_vals[touri_col].nul = 0;
+	n_query_cols++;
+
+	q_cols[shtag_col= n_query_cols] = &str_sh_tag_col;
+	q_vals[shtag_col].type = DB_STR;
+	q_vals[shtag_col].nul = 0;
 	n_query_cols++;
 
 	/* must keep this the last  column to be inserted */
@@ -1114,6 +1127,10 @@ static void db_update(unsigned int ticks,void *param)
 					q_vals[record_route_col].val.str_val = p->record_route;
 					q_vals[contact_col].val.str_val = p->contact;
 					q_vals[remote_contact_col].val.str_val = p->remote_contact;
+					if (is_pua_cluster_enabled() && p->sh_tag.len)
+						q_vals[shtag_col].val.str_val = p->sh_tag;
+					else
+						q_vals[shtag_col].nul = 1;
 					q_vals[extra_headers_col].val.str_val = p->extra_headers;
 
 					if(pua_dbf.insert(pua_db, q_cols, q_vals, n_query_cols)< 0)

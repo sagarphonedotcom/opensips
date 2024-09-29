@@ -91,7 +91,7 @@ static int hep_current_proto;
 
 union sockaddr_union local_su;
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_hep_init_udp, {{0,0,0}}, 0},
 	{"proto_init", (cmd_function)proto_hep_init_tcp, {{0,0,0}}, 0},
 	{"load_hep", (cmd_function)bind_proto_hep, {{0,0,0}}, 0},
@@ -106,7 +106,7 @@ static cmd_export_t cmds[] = {
 	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "hep_port",                        INT_PARAM, &hep_port				},
 	{ "hep_send_timeout",                INT_PARAM, &hep_send_timeout		},
 	{ "hep_max_msg_chunks",              INT_PARAM, &hep_max_msg_chunks     },
@@ -127,7 +127,7 @@ static param_export_t params[] = {
 };
 
 
-static module_dependency_t *get_deps_compression(param_export_t *param)
+static module_dependency_t *get_deps_compression(const param_export_t *param)
 {
 	int do_compression= *(int *)param->param_pointer;
 
@@ -138,7 +138,7 @@ static module_dependency_t *get_deps_compression(param_export_t *param)
 
 }
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
@@ -349,9 +349,12 @@ static int hep_tcp_send (struct socket_info* send_sock,
 
 	/* was connection found ?? */
 	if (c==0) {
-		if (tcp_no_new_conn) {
+		struct tcp_conn_profile prof;
+		int matched = tcp_con_get_profile(to, &send_sock->su, send_sock->proto, &prof);
+
+		if ((matched && prof.no_new_conn) || (!matched && tcp_no_new_conn))
 			return -1;
-		}
+
 		if (!to) {
 			LM_ERR("Unknown destination - cannot open new tcp connection\n");
 			return -1;
@@ -359,7 +362,8 @@ static int hep_tcp_send (struct socket_info* send_sock,
 		LM_DBG("no open tcp connection found, opening new one, async = %d\n",hep_async);
 		/* create tcp connection */
 		if (hep_async) {
-			n = tcp_async_connect(send_sock, to, hep_async_local_connect_timeout, &c, &fd, 1);
+			n = tcp_async_connect(send_sock, to, &prof,
+					hep_async_local_connect_timeout, &c, &fd, 1);
 			if ( n<0 ) {
 				LM_ERR("async TCP connect failed\n");
 				return -1;
@@ -384,7 +388,7 @@ static int hep_tcp_send (struct socket_info* send_sock,
 				return len;
 			}
 			/* our first connect attempt succeeded - go ahead as normal */
-		} else if ((c=tcp_sync_connect(send_sock, to, &fd, 1))==0) {
+		} else if ((c=tcp_sync_connect(send_sock, to, &prof, &fd, 1))==0) {
 			LM_ERR("connect failed\n");
 			return -1;
 		}
@@ -435,7 +439,7 @@ send_it:
 	n = tcp_write_on_socket(c, fd, buf, len,
 			hep_send_timeout, hep_async_local_write_timeout);
 
-	tcp_conn_set_lifetime( c, tcp_con_lifetime);
+	tcp_conn_reset_lifetime(c);
 
 	LM_DBG("after write: c= %p n/len=%d/%d fd=%d\n",c, n, len, fd);
 	/* LM_DBG("buf=\n%.*s\n", (int)len, buf); */
@@ -559,7 +563,7 @@ static inline int hep_handle_req(struct tcp_req *req,
 
 	if (req->complete){
 		/* update the timeout - we successfully read the request */
-		tcp_conn_set_lifetime( con, tcp_con_lifetime);
+		tcp_conn_reset_lifetime(con);
 		con->timeout=con->lifetime;
 
 		/* just for debugging use sendipv4 as receiving socket  FIXME*/
@@ -617,13 +621,13 @@ static inline int hep_handle_req(struct tcp_req *req,
 			/* run hep callbacks; set the current processing context
 			 * to hep context; this way callbacks will have all the data
 			 * needed */
-			current_processing_ctx = ctx;
+			set_global_context(ctx);
 			ret=run_hep_cbs();
 			if (ret < 0) {
 				LM_ERR("failed to run hep callbacks\n");
 				goto error_free_hep;
 			}
-			current_processing_ctx = NULL;
+			set_global_context(NULL);
 
 			msg_len = hep_ctx->h.u.hepv3.payload_chunk.chunk.length-
 											sizeof(hep_chunk_t);
@@ -648,7 +652,8 @@ static inline int hep_handle_req(struct tcp_req *req,
 		if (!size && req != &hep_current_req) {
 			/* if we no longer need this tcp_req
 			 * we can free it now */
-			pkg_free(req);
+			shm_free(req);
+			con->con_req = NULL;
 		}
 
 		con->msg_attempts = 0;
@@ -677,7 +682,7 @@ static inline int hep_handle_req(struct tcp_req *req,
 			/* let's duplicate this - most likely another conn will come in */
 
 			LM_DBG("We didn't manage to read a full request\n");
-			con->con_req = pkg_malloc(sizeof(struct tcp_req));
+			con->con_req = shm_malloc(sizeof(struct tcp_req));
 			if (con->con_req == NULL) {
 				LM_ERR("No more mem for dynamic con request buffer\n");
 				goto error;
@@ -775,7 +780,10 @@ static int hep_tcp_read_req(struct tcp_connection* con, int* bytes_read)
 		goto error;
 	}
 
-	switch (hep_handle_req(req, con, hep_max_msg_chunks) ) {
+	int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
+			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : hep_max_msg_chunks;
+
+	switch (hep_handle_req(req, con, max_chunks) ) {
 		case 1:
 			goto again;
 		case -1:
@@ -884,13 +892,13 @@ static int hep_udp_read_req(struct socket_info *si, int* bytes_read)
 	/* run hep callbacks; set the current processing context
 	 * to hep context; this way callbacks will have all the data
 	 * needed */
-	current_processing_ctx = ctx;
+	set_global_context(ctx);
 	ret=run_hep_cbs();
+	set_global_context(NULL);
 	if (ret < 0) {
 		LM_ERR("failed to run hep callbacks\n");
 		return -1;
 	}
-	current_processing_ctx = NULL;
 
 	if (hep_ctx->h.version == 3) {
 		/* HEPv3 */

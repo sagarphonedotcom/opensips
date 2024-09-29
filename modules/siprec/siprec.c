@@ -31,24 +31,25 @@
 
 #include "siprec_sess.h"
 #include "siprec_logic.h"
+#include "siprec_var.h"
+#include "../rtp_relay/rtp_relay_load.h"
 
 static int mod_preinit(void);
 static int mod_init(void);
 static int child_init(int);
 static void mod_destroy(void);
 
-static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
-		str *_cA, str *_cB, str *rtp, str *m_ip, str *_hdrs);
+static int siprec_start_rec(struct sip_msg *msg, str *srs);
 static int siprec_pause_rec(struct sip_msg *msg);
 static int siprec_resume_rec(struct sip_msg *msg);
 
 /* modules dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT },
 		{ MOD_TYPE_DEFAULT, "dialog", DEP_ABORT },
 		{ MOD_TYPE_DEFAULT, "b2b_entities", DEP_ABORT },
-		{ MOD_TYPE_DEFAULT, "rtpproxy", DEP_ABORT },
+		{ MOD_TYPE_DEFAULT, "rtp_relay", DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
@@ -58,15 +59,9 @@ static dep_export_t deps = {
 };
 
 /* exported commands */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"siprec_start_recording",(cmd_function)siprec_start_rec, {
-		{CMD_PARAM_STR,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		{CMD_PARAM_STR,0,0}, {0,0,0}},
 		REQUEST_ROUTE|ONREPLY_ROUTE},
 	{"siprec_pause_recording",(cmd_function)siprec_pause_rec,
 		{{0,0,0}}, ALL_ROUTES},
@@ -76,12 +71,18 @@ static cmd_export_t cmds[] = {
 };
 
 /* exported parameters */
-static param_export_t params[] = {
-	{"media_port_min",		INT_PARAM, &siprec_port_min },
-	{"media_port_max",		INT_PARAM, &siprec_port_max },
+static const param_export_t params[] = {
 	{"skip_failover_codes",	STR_PARAM, &skip_failover_codes.s },
 	{0, 0, 0}
 };
+
+static const pv_export_t vars[] = {
+	{ {"siprec", sizeof("siprec")-1}, 1000,
+		pv_get_siprec, pv_set_siprec, pv_parse_siprec,
+		0, 0, 0 },
+	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
+};
+
 
 /* module exports */
 struct module_exports exports = {
@@ -96,7 +97,7 @@ struct module_exports exports = {
 	params,							/* exported parameters */
 	0,								/* exported statistics */
 	0,								/* exported MI functions */
-	0,								/* exported pseudo-variables */
+	vars,							/* exported pseudo-variables */
 	0,								/* extra processes */
 	0,								/* extra transformations */
 	mod_preinit,					/* module pre-initialization function */
@@ -127,12 +128,17 @@ static int mod_preinit(void)
 		return -1;
 	}
 
-	if (load_rtpproxy_api(&srec_rtp) != 0) {
-		LM_ERR("rtpproxy module not loaded! Cannot use siprec module\n");
+	if (load_rtp_relay(&srec_rtp) != 0) {
+		LM_ERR("rtp_relay module not loaded! Cannot use siprec module\n");
 		return -1;
 	}
 
 	srec_dlg_idx = srec_dlg.dlg_ctx_register_ptr(NULL);
+
+	if (init_srec_var() < 0) {
+		LM_ERR("cannot initialize siprec variable!\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -144,11 +150,6 @@ static int mod_preinit(void)
 static int mod_init(void)
 {
 	LM_DBG("initializing siprec module ...\n");
-
-	if (srs_init() < 0) {
-		LM_ERR("cannot initialize srs structures!\n");
-		return -1;
-	}
 
 	if (src_init() < 0) {
 		LM_ERR("cannot initialize src structures!\n");
@@ -181,6 +182,7 @@ static void mod_destroy(void)
 static void tm_src_unref_session(void *p)
 {
 	struct src_sess *ss = (struct src_sess *)p;
+	srec_dlg.dlg_unref(ss->dlg, 1); /* release the dialog */
 	srec_hlog(ss, SREC_UNREF, "start recording unref");
 	SIPREC_UNREF(ss);
 }
@@ -188,13 +190,14 @@ static void tm_src_unref_session(void *p)
 /*
  * function that simply prints the parameters passed
  */
-static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
-		str *_cA, str *_cB, str *rtp, str *m_ip, str *_hdrs)
+static int siprec_start_rec(struct sip_msg *msg, str *srs)
 {
 	int ret;
 	str *aor, *display, *xml_val;
 	struct src_sess *ss;
 	struct dlg_cell *dlg;
+	struct srec_var *var;
+	rtp_ctx rtp;
 
 	/* create the dialog, if does not exist yet */
 	dlg = srec_dlg.get_dlg();
@@ -205,12 +208,19 @@ static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
 		}
 		dlg = srec_dlg.get_dlg();
 	}
+	rtp = srec_rtp.get_ctx();
+	if (!rtp) {
+		LM_ERR("no existing rtp relay context!\n");
+		return -2;
+	}
+
+	var = get_srec_var();
 
 	/* XXX: if there is a forced send socket in the message, use it
 	 * this is the only way to provide a different socket for SRS, but
 	 * we might need to take a different approach */
 	/* check if the current dialog has a siprec session ongoing */
-	if (!(ss = src_new_session(srs, rtp, m_ip, group, _hdrs, msg->force_send_socket))) {
+	if (!(ss = src_new_session(srs, rtp, var))) {
 		LM_ERR("cannot create siprec session!\n");
 		return -2;
 	}
@@ -224,8 +234,8 @@ static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
 	ret = -2;
 
 	/* caller info */
-	if (_cA) {
-		xml_val = _cA;
+	if (var && var->caller.len) {
+		xml_val = &var->caller;
 		display = aor = NULL;
 	} else {
 		if (parse_from_header(msg) < 0) {
@@ -241,13 +251,9 @@ static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
 		LM_ERR("cannot add caller participant!\n");
 		goto session_cleanup;
 	}
-	if (srs_fill_sdp_stream(msg, ss, &ss->participants[0], 0) < 0) {
-		LM_ERR("cannot add SDP for caller!\n");
-		goto session_cleanup;
-	}
 	/* caller info */
-	if (_cB) {
-		xml_val = _cB;
+	if (var && var->callee.len) {
+		xml_val = &var->callee;
 	} else {
 		if ((!msg->to && parse_headers(msg, HDR_TO_F, 0) < 0) || !msg->to) {
 			LM_ERR("inexisting or invalid to header!\n");
@@ -275,6 +281,7 @@ static int siprec_start_rec(struct sip_msg *msg, str *srs, str *group,
 	return 1;
 
 session_cleanup:
+	srec_dlg.dlg_unref(dlg, 1);
 	src_free_session(ss);
 	return ret;
 }

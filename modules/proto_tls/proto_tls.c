@@ -64,6 +64,8 @@
 
 #include "../../net/trans_trace.h"
 
+#include "../../net/net_tcp_dbg.h"
+
 /*
  * Open questions:
  *
@@ -199,7 +201,7 @@ trace_proto_t tprot;
 /* module  tracing parameters */
 static int trace_is_on_tmp=0, *trace_is_on;
 static char* trace_filter_route;
-static int trace_filter_route_id = -1;
+static struct script_route_ref *trace_filter_route_ref = NULL;
 
 /**/
 
@@ -208,13 +210,13 @@ static int tls_async_write(struct tcp_connection* con,int fd);
 static int proto_tls_conn_init(struct tcp_connection* c);
 static void proto_tls_conn_clean(struct tcp_connection* c);
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_tls_init, {{0, 0, 0}}, 0},
 	{ 0, 0, {{0, 0, 0}}, 0}
 };
 
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "tls_port",              INT_PARAM,         &tls_port_no               },
 	{ "tls_crlf_pingpong",     INT_PARAM,         &tls_crlf_pingpong         },
 	{ "tls_crlf_drop",         INT_PARAM,         &tls_crlf_drop             },
@@ -235,7 +237,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tls_mgm"  , DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
@@ -246,7 +248,7 @@ static dep_export_t deps = {
 	},
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "tls_trace", 0, 0, 0, {
 		{tls_trace_mi, {0}},
 		{tls_trace_mi_1, {"trace_mode", 0}},
@@ -317,9 +319,9 @@ static int mod_init(void)
 
 	*trace_is_on = trace_is_on_tmp;
 	if ( trace_filter_route ) {
-		trace_filter_route_id =
-			get_script_route_ID_by_name( trace_filter_route,
-				sroutes->request, RT_NO);
+		trace_filter_route_ref =
+			ref_script_route_by_name( trace_filter_route,
+				sroutes->request, RT_NO, REQUEST_ROUTE, 0);
 	}
 
 	return 0;
@@ -405,7 +407,7 @@ static int proto_tls_conn_init(struct tcp_connection* c)
 			data->dest  = t_dst;
 			data->net_trace_proto_id = net_trace_proto_id;
 			data->trace_is_on = trace_is_on;
-			data->trace_route_id = trace_filter_route_id;
+			data->trace_route_ref = trace_filter_route_ref;
 		}
 
 		c->proto_data = data;
@@ -505,9 +507,12 @@ static int proto_tls_send(struct socket_info* send_sock,
 
 	/* was connection found ?? */
 	if (c==0) {
-		if (tcp_no_new_conn) {
+		struct tcp_conn_profile prof;
+		int matched = tcp_con_get_profile(to, &send_sock->su, send_sock->proto, &prof);
+
+		if ((matched && prof.no_new_conn) || (!matched && tcp_no_new_conn))
 			return -1;
-		}
+
 		if (!to) {
 			LM_ERR("Unknown destination - cannot open new ws connection\n");
 			return -1;
@@ -515,7 +520,8 @@ static int proto_tls_send(struct socket_info* send_sock,
 		LM_DBG("no open tcp connection found, opening new one, async = %d\n",
 			tls_async);
 		if (tls_async) {
-			n = tcp_async_connect(send_sock, to, tls_async_local_connect_timeout, &c, &fd, 1);
+			n = tcp_async_connect(send_sock, to, &prof,
+					tls_async_local_connect_timeout, &c, &fd, 1);
 			if (n<0) {
 				LM_ERR("async TCP connect failed\n");
 				return -1;
@@ -555,7 +561,7 @@ static int proto_tls_send(struct socket_info* send_sock,
 				/* attach the write buffer to it */
 				if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
 					LM_ERR("Failed to add the initial write chunk\n");
-					len = -1; /* report an error - let the caller decide what to do */
+					rlen = -1; /* report an error - let the caller decide what to do */
 				}
 
 				LM_DBG("Successfully started async SSL connection \n");
@@ -567,7 +573,7 @@ static int proto_tls_send(struct socket_info* send_sock,
 		} else {
 			/* it is safe to send the fd to the main, because it doesn't
 			 * matter which process completes the handshake */
-			if ((c=tcp_sync_connect(send_sock, to, &fd, 1))==0) {
+			if ((c=tcp_sync_connect(send_sock, to, &prof, &fd, 1))==0) {
 				LM_ERR("connect failed\n");
 				return -1;
 			}
@@ -589,7 +595,7 @@ send_it:
 	LM_DBG("sending via fd %d...\n",fd);
 
 	rlen = tls_write_on_socket(c, fd, buf, len);
-	tcp_conn_set_lifetime( c, tcp_con_lifetime);
+	tcp_conn_reset_lifetime(c);
 
 	LM_DBG("after write: c=%p n=%d fd=%d\n",c, rlen, fd);
 	LM_DBG("buf=\n%.*s\n", (int)len, buf);
@@ -622,7 +628,7 @@ con_release:
 
 static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 {
-	int ret;
+	int ret, rc = 0;
 	int bytes;
 	int total_bytes;
 	struct tcp_req* req;
@@ -723,7 +729,10 @@ again:
 		goto error;
 	}
 
-	switch (tcp_handle_req(req, con, tls_max_msg_chunks) ) {
+	int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
+			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : tls_max_msg_chunks;
+
+	switch ((rc = tcp_handle_req(req, con, max_chunks, 0))) {
 		case 1:
 			goto again;
 		case -1:
@@ -733,8 +742,9 @@ again:
 	LM_DBG("tls_read_req end\n");
 done:
 	if (bytes_read) *bytes_read=total_bytes;
-	/* connection will be released */
-	return 0;
+
+	return rc == 2   ?  1  /* connection is already released! */
+	       /* 0,1? */:  0; /* connection will be released */
 error:
 	/* connection will be released as ERROR */
 	return -1;

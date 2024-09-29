@@ -323,8 +323,8 @@ modparam("proto_tls", "cert_check_on_conn_reusage", 1)
 
    Example 1.7. Set trace_destination parameter
 ...
-modparam("proto_hep", "trace_destination", "[hep_dest]10.0.0.2;transport
-=tcp;version=3")
+modparam("proto_hep", "hep_id", "[hep_dest]10.0.0.2;transport=tcp;versio
+n=3")
 
 modparam("proto_tls", "trace_destination", "hep_dest")
 ...
@@ -402,10 +402,10 @@ route[tls_filter] {
    Default value is 100.
 
    Example 1.10. Set tls_handshake_timeout variable
-
-param("proto_tls", "tls_handshake_timeout", 200) # number of millisecond
-s
-
+...
+modparam("proto_tls", "tls_handshake_timeout", 200) # number of millisec
+onds
+...
 
 1.5.11. tls_send_timeout (integer)
 
@@ -418,9 +418,9 @@ s
    Default value is 100.
 
    Example 1.11. Set tls_send_timeout variable
-
-param("proto_tls", "tls_send_timeout", 200) # number of milliseconds
-
+...
+modparam("proto_tls", "tls_send_timeout", 200) # number of milliseconds
+...
 
 1.5.12. tls_async (integer)
 
@@ -432,9 +432,9 @@ param("proto_tls", "tls_send_timeout", 200) # number of milliseconds
    Default value is 1 (enabled).
 
    Example 1.12. Set tls_async variable
-
-param("proto_tls", "tls_async", 1) # enable async TLS
-
+...
+modparam("proto_tls", "tls_async", 1) # enable async TLS
+...
 
 1.5.13. tls_async_max_postponed_chunks (integer)
 
@@ -581,15 +581,15 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 57 30 1547 811
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 60 33 1554 818
    2. Razvan Crainea (@razvancrainea) 53 33 920 706
    3. Eseanu Marius Cristian (@eseanucristian) 41 5 55 2133
    4. Ionut Ionita (@ionutrazvanionita) 35 14 1232 576
-   5. Vlad Patrascu (@rvlad-patrascu) 17 11 171 200
-   6. Liviu Chircu (@liviuchircu) 10 7 30 105
-   7. Bogdan Chifor 5 2 141 1
-   8. Vlad Paiu (@vladpaiu) 4 2 84 3
-   9. Maksym Sobolyev (@sobomax) 4 2 3 18
+   5. Vlad Patrascu (@rvlad-patrascu) 20 14 186 213
+   6. Liviu Chircu (@liviuchircu) 15 12 49 118
+   7. Maksym Sobolyev (@sobomax) 5 3 7 22
+   8. Bogdan Chifor 5 2 141 1
+   9. Vlad Paiu (@vladpaiu) 4 2 84 3
    10. Dan Pascu (@danpascu) 3 1 2 4
 
    All remaining contributors: Nick Altmann (@nikbyte), Julián
@@ -615,14 +615,14 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - May 2021
-   2.  Nick Altmann (@nikbyte)             May 2021 - May 2021
-   3.  Bogdan-Andrei Iancu (@bogdan-iancu) Feb 2015 - Apr 2021
-   4.  Razvan Crainea (@razvancrainea)     Feb 2015 - Jan 2021
-   5.  Maksym Sobolyev (@sobomax)          Jul 2017 - Sep 2020
-   6.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
-   7.  Dan Pascu (@danpascu)               Jan 2020 - Jan 2020
-   8.  Liviu Chircu (@liviuchircu)         Mar 2015 - May 2019
+   1.  Liviu Chircu (@liviuchircu)         Mar 2015 - Jul 2024
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Feb 2015 - Dec 2023
+   3.  Maksym Sobolyev (@sobomax)          Jul 2017 - Feb 2023
+   4.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Feb 2023
+   5.  Nick Altmann (@nikbyte)             May 2021 - May 2021
+   6.  Razvan Crainea (@razvancrainea)     Feb 2015 - Jan 2021
+   7.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
+   8.  Dan Pascu (@danpascu)               Jan 2020 - Jan 2020
    9.  Peter Lemenkov (@lemenkov)          Jun 2018 - Jun 2018
    10. Ionut Ionita (@ionutrazvanionita)   Mar 2015 - Apr 2017
 

@@ -126,7 +126,8 @@ enum _pv_type {
 	PVT_TIME,             PVT_PATH,              PVT_ARGV,
 	PVT_HDRCNT,           PVT_AUTH_NONCE_COUNT,  PVT_AUTH_QOP,
 	PVT_AUTH_ALGORITHM,   PVT_AUTH_OPAQUE,       PVT_AUTH_CNONCE,
-	PVT_RU_Q,             PVT_ROUTE_PARAM,       PVT_ROUTE_NAME,
+	PVT_RU_Q,             PVT_ROUTE_PARAM,       PVT_ROUTE,
+	PVT_ROUTE_NAME,       PVT_ROUTE_TYPE,
 	PVT_LINE_NUMBER,      PVT_CFG_FILE_NAME,     PVT_LOG_LEVEL,
 	PVT_XLOG_LEVEL,       PVT_AF,                PVT_HDR_NAME,
 	PVT_SOCKET_IN,        PVT_SOCKET_OUT,        PVT_BRANCH_FLAG,
@@ -225,6 +226,10 @@ typedef struct _pv_export {
 	int iparam;                    /*!< parameter for the init function */
 } pv_export_t;
 
+#ifdef FUZZ_BUILD
+extern const pv_export_t _pv_names_table[];
+#endif
+
 typedef struct _pv_elem
 {
 	str text;
@@ -268,7 +273,7 @@ typedef struct pv_spec_list {
 
 pvname_list_t* parse_pvname_list(str *in, unsigned int type);
 
-int register_pvars_mod(char *mod_name, pv_export_t *items);
+int register_pvars_mod(const char *mod_name, const pv_export_t *items);
 int pv_free_extra_list(void);
 
 /*! \brief PV helper functions */

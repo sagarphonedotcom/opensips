@@ -1,5 +1,3 @@
-# $Id$
-#
 # example module makefile
 #
 # 
@@ -13,7 +11,6 @@ SCRIPTS_DIR?=../../scripts/
 include ../../Makefile.defs
 auto_gen=
 NAME=db_text.so
-LIBS=
 
 include ../../Makefile.modules
 

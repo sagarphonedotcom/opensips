@@ -38,6 +38,7 @@
 #include "../../lib/csv.h"
 #include "../../mod_fix.h"
 #include "../../ipc.h"
+#include "../../status_report.h"
 #include "dialplan.h"
 #include "dp_db.h"
 
@@ -55,7 +56,6 @@
 
 static int mod_init(void);
 static int child_init(int rank);
-static int mi_child_init(void);
 static void mod_destroy();
 
 static mi_response_t *mi_reload_rules(const mi_params_t *params,
@@ -84,8 +84,10 @@ str dp_df_part = str_init(DEFAULT_PARTITION);
 dp_param_p default_par2 = NULL;
 static str database_url = {NULL, 0};
 
+void *dp_srg = NULL;
 
-static param_export_t mod_params[]={
+
+static const param_export_t mod_params[]={
 	{ "partition",		STR_PARAM|USE_FUNC_PARAM,
 				(void*)dp_set_partition},
 	{ "db_url",		STR_PARAM,	&default_dp_db_url.s},
@@ -103,8 +105,8 @@ static param_export_t mod_params[]={
 	{0,0,0}
 };
 
-static mi_export_t mi_cmds[] = {
-	{ "dp_reload", 0, 0, mi_child_init, {
+static const mi_export_t mi_cmds[] = {
+	{ "dp_reload", 0, 0, NULL, {
 		{mi_reload_rules, {0}},
 		{mi_reload_rules_1, {"partition", 0}},
 		{EMPTY_MI_RECIPE}}
@@ -114,7 +116,7 @@ static mi_export_t mi_cmds[] = {
 		{mi_translate3, {"dpid", "input", "partition", 0}},
 		{EMPTY_MI_RECIPE}}
 	},
-	{ "dp_show_partition", 0, 0, mi_child_init, {
+	{ "dp_show_partition", 0, 0, NULL, {
 		{mi_show_partition, {0}},
 		{mi_show_partition_1, {"partition", 0}},
 		{EMPTY_MI_RECIPE}}
@@ -122,7 +124,7 @@ static mi_export_t mi_cmds[] = {
 	{EMPTY_MI_EXPORT}
 };
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"dp_translate", (cmd_function)dp_translate_f,
 		{ {CMD_PARAM_INT, NULL, NULL},
 		  {CMD_PARAM_STR, NULL, NULL},
@@ -137,7 +139,7 @@ static cmd_export_t cmds[]={
 	{0,0,{{0,0,0}},0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_SQLDB, NULL, DEP_WARN },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -384,6 +386,12 @@ static int mod_init(void)
 		return -1;
 	}
 
+	dp_srg = sr_register_group( CHAR_INT("dialplan"), 0 /*not public*/);
+	if (dp_srg==NULL) {
+		LM_ERR("failed to create dialplan group for 'status-report'");
+		return -1;
+	}
+
 	dp_print_list();
 	if(init_data() != 0) {
 		LM_ERR("could not initialize data\n");
@@ -399,7 +407,7 @@ static int mod_init(void)
  * when done */
 static void dp_rpc_data_load(int sender_id, void *unused)
 {
-	if(dp_load_all_db() != 0){
+	if(dp_load_all_db(1) != 0){
 		LM_ERR("failed to reload database\n");
 		return;
 	}
@@ -411,10 +419,6 @@ static int child_init(int rank)
 {
 	dp_connection_list_p el;
 
-	/* only process with rank 1 loads data */
-	if (rank != 1)
-		return 0;
-
 	/* Connect to DBs.... */
 	for(el = dp_conns; el; el = el->next){
 		if (dp_connect_db(el) != 0) {
@@ -423,6 +427,10 @@ static int child_init(int rank)
 			return -1;
 		}
 	}
+
+	/* only process with rank 1 loads data */
+	if (rank != 1)
+		return 0;
 
 	/* ...and fire the RPC to perform the data load in the
 	 * same process, but after child_init is done */
@@ -433,29 +441,6 @@ static int child_init(int rank)
 
 	return 0;
 }
-
-
-static int mi_child_init(void)
-{
-	static int mi_child_initialized = 0;
-	dp_connection_list_p el;
-
-	if (mi_child_initialized)
-		return 0;
-
-	/* Connect to DB s */
-	for(el = dp_conns; el; el = el->next){
-		if (dp_connect_db(el) != 0) {
-			/* all el shall be freed in mod destroy */
-			LM_ERR("Unable to init/connect db connection\n");
-			return -1;
-		}
-	}
-
-	mi_child_initialized = 1;
-	return 0;
-}
-
 
 
 static void mod_destroy(void)
@@ -562,10 +547,15 @@ static int dp_translate_f(struct sip_msg *msg, int* dpid, str *in_str,
 	/* we are done reading -> unref the data */
 	lock_stop_read( part->ref_lock );
 
-	if (attr_var && attrs.s && attrs.len) {
+	if (attr_var) {
 		verify_par_type(*attr_var);
+
 		pval.flags = PV_VAL_STR;
-		pval.rs = attrs;
+
+		if (ZSTR(attrs))
+			pval.rs = str_init("");
+		else
+			pval.rs = attrs;
 
 		if (pv_set_value(msg, attr_var, 0, &pval) != 0) {
 			LM_ERR("failed to set value '%.*s' for the attr pvar!\n",
@@ -738,7 +728,7 @@ error:
 static mi_response_t *mi_reload_rules(const mi_params_t *params,
 								struct mi_handler *async_hdl)
 {
-	if(dp_load_all_db() != 0){
+	if(dp_load_all_db(0) != 0){
 			LM_ERR("failed to reload database\n");
 			return 0;
 	}
@@ -760,7 +750,7 @@ static mi_response_t *mi_reload_rules_1(const mi_params_t *params,
 			return init_mi_error( 400, MI_SSTR("Partition not found"));
 	/* Reload rules from specified  partition */
 	LM_DBG("Reloading rules from partition %.*s\n", table.len, table.s);
-	if(dp_load_db(el) != 0){
+	if(dp_load_db(el,0) != 0){
 			LM_ERR("failed to reload database data\n");
 			return 0;
 	}

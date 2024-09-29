@@ -31,9 +31,9 @@
 
 #include "../../net/tcp_conn_defs.h"
 #include "../../net/proto_tcp/tcp_common_defs.h"
-#include "../../trace_api.h"
 #include "../tls_mgm/tls_helper.h"
 
+#include "wolfssl_trace.h"
 #include "wolfssl.h"
 
 int _wolfssl_has_session_ticket(WOLFSSL *ssl);
@@ -304,6 +304,36 @@ void _wolfssl_tls_conn_clean(struct tcp_connection* c,
 	*tls_dom = d;
 }
 
+static inline void _wolfssl_enforce_max_version(struct tcp_connection *c)
+{
+	int r_vers, wr_vers;
+
+	r_vers = wolfSSL_version(_WOLFSSL_READ_SSL(c->extra_data));
+	wr_vers = wolfSSL_version(_WOLFSSL_WRITE_SSL(c->extra_data));
+	if (r_vers == wr_vers)
+		return;
+
+	switch(r_vers) {
+	case SSL2_VERSION:
+		LM_BUG("SSLv2 should not be supported\n");
+		break;
+	case SSL3_VERSION:
+		wolfSSL_set_options(_WOLFSSL_WRITE_SSL(c->extra_data),
+			WOLFSSL_OP_NO_TLSv1);
+	case TLS1_VERSION:
+		wolfSSL_set_options(_WOLFSSL_WRITE_SSL(c->extra_data),
+			WOLFSSL_OP_NO_TLSv1_1);
+	case TLS1_1_VERSION:
+		wolfSSL_set_options(_WOLFSSL_WRITE_SSL(c->extra_data),
+			WOLFSSL_OP_NO_TLSv1_2);
+	case TLS1_2_VERSION:
+		wolfSSL_set_options(_WOLFSSL_WRITE_SSL(c->extra_data),
+			WOLFSSL_OP_NO_TLSv1_3);
+	case TLS1_3_VERSION:
+		break;
+	}
+}
+
 int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 	int timeout, trace_dest t_dst)
 {
@@ -312,6 +342,7 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 	int poll_err, n, err;
 	struct timeval begin;
 	char err_buf[_WOLFSSL_ERR_BUFLEN];
+	str tls_err_s;
 #if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
 	fd_set sel_set;
 	fd_set orig_set;
@@ -343,6 +374,11 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 		if ((n = wolfSSL_connect(ssl)) == SSL_SUCCESS) {
 			LM_INFO("new TLS connection to %s:%d established\n",
 					ip_addr2a(&con->rcv.src_ip), con->rcv.src_port);
+
+			_wolfssl_trace_tls(con, ssl, TRANS_TRACE_CONNECTED,
+					TRANS_TRACE_SUCCESS, &ASYNC_CONNECT_OK);
+			tls_send_trace_data(con, t_dst);
+
 			con->proto_flags &= ~F_TLS_DO_CONNECT;
 
 			_WOLFSSL_WRITE_SSL(con->extra_data) = wolfSSL_write_dup(ssl);
@@ -351,6 +387,8 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 					errno, strerror(errno));
 				return -1;
 			}
+
+			_wolfssl_enforce_max_version(con);
 
 			return 1;
 		}
@@ -400,7 +438,12 @@ again:
 #endif
 				{
 					err_len=sizeof(err);
-					getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+					if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+						LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n", fd,
+								ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
+								errno, strerror(errno));
+						goto failure;
+					}
 					if ((err==0) && (poll_err==0))
 						continue; /* retry ssl connect */
 					if (err!=EINPROGRESS && err!=EALREADY){
@@ -422,10 +465,24 @@ again:
 
 				con->state = S_CONN_BAD;
 
+				if (TLS_TRACE_IS_ON(con)) {
+					wolfSSL_ERR_error_string(err, err_buf);
+					tls_err_s.len = strlen(err_buf);
+					tls_err_s.s = err_buf;
+
+					_wolfssl_trace_tls(con, ssl, TRANS_TRACE_CONNECTED,
+							TRANS_TRACE_FAILURE, &tls_err_s);
+					tls_send_trace_data(con, t_dst);
+				}
+
 				return -1;
 		}
 	}
 failure:
+	_wolfssl_trace_tls(con, ssl, TRANS_TRACE_CONNECTED,
+			TRANS_TRACE_FAILURE, &CONNECT_FAIL);
+	tls_send_trace_data(con, t_dst);
+
 	con->state = S_CONN_BAD;
 	return -1;
 }
@@ -482,6 +539,7 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 	int ret, err;
 	WOLFSSL *ssl;
 	char err_buf[_WOLFSSL_ERR_BUFLEN];
+	str tls_err_s;
 	WOLFSSL_X509* cert;
 
 	if ( (c->proto_flags&F_TLS_DO_ACCEPT)==0 ) {
@@ -496,6 +554,9 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 		LM_INFO("New TLS connection from %s:%d accepted\n",
 			ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
 
+		_wolfssl_trace_tls(c, ssl, TRANS_TRACE_ACCEPTED, TRANS_TRACE_SUCCESS,
+			&ACCEPT_OK);
+
 		/* TLS accept done, reset the flag */
 		c->proto_flags &= ~F_TLS_DO_ACCEPT;
 
@@ -505,6 +566,8 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 				errno, strerror(errno));
 			return -1;
 		}
+
+		_wolfssl_enforce_max_version(c);
 
 		LM_DBG("new TLS connection from %s:%d using %s\n",
 			ip_addr2a(&c->rcv.src_ip), c->rcv.src_port,
@@ -535,6 +598,9 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 				LM_INFO("TLS connection from %s:%d accept failed cleanly\n",
 					ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
 
+				_wolfssl_trace_tls(c, ssl, TRANS_TRACE_ACCEPTED,
+						TRANS_TRACE_FAILURE, &ACCEPT_FAIL);
+
 				c->state = S_CONN_BAD;
 
 				return -1;
@@ -558,6 +624,15 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 				LM_ERR("TLS accept error: %d, %s\n", err,
 					wolfSSL_ERR_error_string(err, err_buf));
 
+				if (TLS_TRACE_IS_ON(c)) {
+					wolfSSL_ERR_error_string(err, err_buf);
+					tls_err_s.len = strlen(err_buf);
+					tls_err_s.s = err_buf;
+
+					_wolfssl_trace_tls(c, ssl, TRANS_TRACE_ACCEPTED,
+							TRANS_TRACE_FAILURE, &tls_err_s);
+				}
+
 				return -1;
 		}
 	}
@@ -566,11 +641,13 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 	return -1;
 }
 
-static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events)
+static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events,
+	trace_dest t_dst)
 {
 	int ret, err;
 	WOLFSSL *ssl;
 	char err_buf[_WOLFSSL_ERR_BUFLEN];
+	str tls_err_s;
 	WOLFSSL_X509* cert;
 
 	if ( (c->proto_flags&F_TLS_DO_CONNECT)==0 ) {
@@ -584,6 +661,11 @@ static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events)
 	if (ret == SSL_SUCCESS) {
 		LM_INFO("New TLS connection to %s:%d established\n",
 			ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
+
+		_wolfssl_trace_tls(c, ssl, TRANS_TRACE_CONNECTED,
+				TRANS_TRACE_SUCCESS, &CONNECT_OK);
+		tls_send_trace_data(c, t_dst);
+
 		c->proto_flags &= ~F_TLS_DO_CONNECT;
 
 		_WOLFSSL_WRITE_SSL(c->extra_data) = wolfSSL_write_dup(ssl);
@@ -592,6 +674,8 @@ static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events)
 				errno, strerror(errno));
 			return -1;
 		}
+
+		_wolfssl_enforce_max_version(c);
 
 		LM_DBG("new TLS connection to %s:%d using %s\n",
 			ip_addr2a(&c->rcv.src_ip), c->rcv.src_port,
@@ -619,6 +703,10 @@ static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events)
 				LM_INFO("New TLS connection to %s:%d failed cleanly\n",
 					ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
 
+				_wolfssl_trace_tls(c, ssl, TRANS_TRACE_CONNECTED,
+						TRANS_TRACE_FAILURE, &CONNECT_FAIL);
+				tls_send_trace_data(c, t_dst);
+
 				c->state = S_CONN_BAD;
 				return -1;
 			case SSL_ERROR_WANT_READ:
@@ -641,6 +729,16 @@ static int _wolfssl_tls_connect(struct tcp_connection *c, short *poll_events)
 				LM_ERR("TLS connect error: %d, %s\n", err,
 					wolfSSL_ERR_error_string(err, err_buf));
 				c->state = S_CONN_BAD;
+
+				if (TLS_TRACE_IS_ON(c)) {
+					wolfSSL_ERR_error_string(err, err_buf);
+					tls_err_s.len = strlen(err_buf);
+					tls_err_s.s = err_buf;
+
+					_wolfssl_trace_tls(c, ssl, TRANS_TRACE_CONNECTED,
+							TRANS_TRACE_FAILURE, &tls_err_s);
+					tls_send_trace_data(c, t_dst);
+				}
 
 				return -1;
 		}
@@ -681,7 +779,7 @@ again:
 			goto error;
 		timeout = handshake_timeout;
 	} else if ( c->proto_flags & F_TLS_DO_CONNECT ) {
-		if (_wolfssl_tls_connect(c, &(pf.events)) < 0)
+		if (_wolfssl_tls_connect(c, &(pf.events), t_dst) < 0)
 			goto error;
 		timeout = handshake_timeout;
 	} else {
@@ -780,7 +878,7 @@ int _wolfssl_tls_fix_read_conn(struct tcp_connection *c, int fd,
 			if (c->async && async_timeout)
 				ret = _wolfssl_tls_async_connect(c, fd, async_timeout, t_dst);
 			else
-				ret = _wolfssl_tls_connect(c, NULL);
+				ret = _wolfssl_tls_connect(c, NULL, t_dst);
 		}
 	} else
 		ret = 1;
@@ -801,6 +899,7 @@ static int _wolfssl_read(struct tcp_connection *c, void *buf, size_t len)
 
 	ret = wolfSSL_read(ssl, buf, len);
 	if (ret > 0) {
+		wolfSSL_ERR_clear_error();
 		LM_DBG("%d bytes read\n", ret);
 		return ret;
 	} else if (ret == 0) {
@@ -815,12 +914,15 @@ static int _wolfssl_read(struct tcp_connection *c, void *buf, size_t len)
 				ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
 		}
 
+		wolfSSL_ERR_clear_error();
+
 		return 0;
 	} else {
 		err = wolfSSL_get_error(ssl, ret);
 		switch (err) {
 		case SSL_ERROR_WANT_READ:
 		case SSL_ERROR_WANT_WRITE:
+			wolfSSL_ERR_clear_error();
 			return 0;
 		case SSL_ERROR_SYSCALL:
 			LM_ERR("SYSCALL error -> (%d) <%s>\n",errno,strerror(errno));
@@ -831,6 +933,8 @@ static int _wolfssl_read(struct tcp_connection *c, void *buf, size_t len)
 			LM_ERR("TLS read error: %d, %s\n",err,
 				wolfSSL_ERR_error_string(err, err_buf));
 			c->state = S_CONN_BAD;
+
+			wolfSSL_ERR_clear_error();
 
 			return -1;
 		}

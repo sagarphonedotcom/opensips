@@ -45,25 +45,25 @@ int use_tls;
 struct openssl_binds openssl_api;
 struct tls_mgm_binds tls_api;
 
-#if AMQP_VERSION < 0x00090000
+#if AMQP_VERSION < AMQP_VERSION_CODE(0, 10, 0, 0)
 gen_lock_t *ssl_lock;
 #endif
 
-static param_export_t params[]={
+static const param_export_t params[]={
 	{ "server_id",			STR_PARAM|USE_FUNC_PARAM,
 		(void *)rmq_server_add},
 	{"use_tls", INT_PARAM, &use_tls},
 	{0,0,0}
 };
 
-static module_dependency_t *get_deps_use_tls_mgm(param_export_t *param)
+static module_dependency_t *get_deps_use_tls_mgm(const param_export_t *param)
 {
 	if (*(int *)param->param_pointer == 0)
 		return NULL;
 
 	return alloc_module_dep(MOD_TYPE_DEFAULT, "tls_mgm", DEP_ABORT);
 }
-static module_dependency_t *get_deps_use_tls_openssl(param_export_t *param)
+static module_dependency_t *get_deps_use_tls_openssl(const param_export_t *param)
 {
 	if (*(int *)param->param_pointer == 0)
 		return NULL;
@@ -72,7 +72,7 @@ static module_dependency_t *get_deps_use_tls_openssl(param_export_t *param)
 }
 
 /* modules dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
@@ -84,7 +84,7 @@ static dep_export_t deps = {
 };
 
 /* exported commands */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"rabbitmq_publish",(cmd_function)rmq_publish, {
 		{CMD_PARAM_STR, fixup_rmq_server, 0},
 		{CMD_PARAM_STR, 0, 0},
@@ -143,7 +143,7 @@ static int mod_init(void)
 			return -1;
 		}
 
-		#if AMQP_VERSION < 0x00090000
+		#if AMQP_VERSION < AMQP_VERSION_CODE(0, 10, 0, 0)
 		ssl_lock = lock_alloc();
 		if (!ssl_lock) {
 			LM_ERR("No more shm memory\n");
@@ -177,7 +177,7 @@ static void mod_destroy(void)
 {
 	LM_NOTICE("destroying RabbitMQ module ...\n");
 
-	#if AMQP_VERSION < 0x00090000
+	#if AMQP_VERSION < AMQP_VERSION_CODE(0, 10, 0, 0)
 	lock_destroy(ssl_lock);
 	lock_dealloc(ssl_lock);
 	#endif

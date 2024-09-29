@@ -113,7 +113,7 @@ static db_con_t *db_hdl = 0;
 /* DB functions */
 static db_func_t dr_dbf;
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "tls_library",	STR_PARAM,  &tls_library_param.s },
 	{ "client_tls_domain_avp",     STR_PARAM,         &tls_domain_avp        },
 	{ "client_sip_domain_avp",     STR_PARAM,         &sip_domain_avp        },
@@ -153,7 +153,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"is_peer_verified", (cmd_function)tls_is_peer_verified, {{0,0,0}},
 		REQUEST_ROUTE},
 	{"load_tls_mgm", (cmd_function)load_tls_mgm,
@@ -164,7 +164,7 @@ static cmd_export_t cmds[] = {
 /*
  * Exported MI functions
  */
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "tls_reload", "reloads stored data from the database", 0, 0, {
 		{tls_reload, {0}},
 		{EMPTY_MI_RECIPE}}
@@ -179,7 +179,7 @@ static mi_export_t mi_cmds[] = {
 /*
  *  pseudo variables
  */
-static pv_export_t mod_items[] = {
+static const pv_export_t mod_items[] = {
 	/* TLS session parameters */
 	{{"tls_version", sizeof("tls_version")-1},
 		850, tlsops_version, 0,
@@ -346,7 +346,7 @@ static pv_export_t mod_items[] = {
 
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tls_openssl", DEP_SILENT },
 		{ MOD_TYPE_DEFAULT, "tls_wolfssl", DEP_SILENT },
@@ -606,13 +606,9 @@ int tls_sni_cb(struct tls_domain *dom, struct tcp_connection *c,
 void destroy_tls_dom(struct tls_domain *d)
 {
 	if (tls_library == TLS_LIB_OPENSSL)
-		return openssl_api.destroy_tls_dom(d);
+		openssl_api.destroy_tls_dom(d);
 	else if (tls_library == TLS_LIB_WOLFSSL)
-		return wolfssl_api.destroy_tls_dom(d);
-
-	lock_destroy(d->lock);
-	lock_dealloc(d->lock);
-	shm_free(d);
+		wolfssl_api.destroy_tls_dom(d);
 }
 
 static int init_tls_dom(struct tls_domain *d)
@@ -709,7 +705,7 @@ static int init_tls_domains(struct tls_domain **dom)
 
 			tmp = d;
 			d = d->next;
-			destroy_tls_dom(tmp);
+			tls_free_domain(tmp);
 
 			if (!db)
 				return -1;
@@ -759,7 +755,7 @@ static int init_tls_domains(struct tls_domain **dom)
 
 			tmp = d;
 			d = d->next;
-			destroy_tls_dom(tmp);
+			tls_free_domain(tmp);
 
 			if (!db)
 				return -1;

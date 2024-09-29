@@ -21,11 +21,7 @@
 %global _with_cachedb_mongodb 1
 %endif
 
-%if 0%{?rhel} > 7 || 0%{?fedora} > 23
-%global _without_aaa_radius 1
-%endif
-
-%if 0%{?rhel} > 7
+%if 0%{?rhel} > 7 || 0%{?fedora} > 36
 %global _with_python3 1
 %endif
 
@@ -33,15 +29,19 @@
 %global _with_aaa_diameter 1
 %endif
 
+%if 0%{?fedora} > 32
+%global _without_snmpstats 1
+%endif
+
 %if 0%{?rhel} > 7 || 0%{?fedora} > 30
 %global _with_wolfssl 1
 %endif
 
-%global EXCLUDE_MODULES %{!?_with_auth_jwt:auth_jwt} %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{!?_with_aaa_diameter:aaa_diameter} %{?_without_aaa_radius:aaa_radius} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats} %{!?_with_wolfssl:tls_wolfssl}
+%global EXCLUDE_MODULES %{!?_with_auth_jwt:auth_jwt} %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{!?_with_aaa_diameter:aaa_diameter} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats} %{!?_with_wolfssl:tls_wolfssl}
 
 Summary:  Very fast and configurable SIP server
 Name:     opensips
-Version:  3.3.0
+Version:  3.4.8
 Release:  1%{?dist}
 License:  GPLv2+
 Group:    System Environment/Daemons
@@ -83,6 +83,9 @@ BuildRequires:  pcre-devel
 BuildRequires:  python3-devel
 %else
 BuildRequires:  python-devel
+%endif
+%if 0%{?fedora} > 38
+BuildRequires:  python3-setuptools
 %endif
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
 BuildRequires:  systemd-units
@@ -149,17 +152,20 @@ and two timestamps describing a validation interval. Multiple
 JWT secrets can point to the same JWT profile.
 %endif
 
-%package  b2bua-module
-Summary:  B2B User Agent modules for OpenSIPS
+%package  auth-modules
+Summary:  Authentication interfaces for OpenSIPS
 Group:    System Environment/Daemons
 Requires: %{name} = %{version}-%{release}
 
-%description  b2bua-module
+%description  auth-modules
 OpenSIPS is a very fast and flexible SIP (RFC3261)
 server. Written entirely in C, OpenSIPS can handle thousands calls
 per second even on low-budget hardware.
 .
-This package provides old style XML module for B2BUA support in OpenSIPS.
+This package provides the modules that are being used to provide
+SIP authentication in OpenSIPS. It consists of both the
+authentication interface (the auth module), as well as the UAC
+authentication module (uac_auth).
 
 %package  berkeley-bin
 Summary:  Berkeley Database module for OpenSIPS - helper program
@@ -480,6 +486,18 @@ This module is an implementation of a cache system designed to work with
 MongoDB servers.
 %endif
 
+%package  msrp-modules
+Summary:  Implementation of the MSRP protocol
+Group:    System Environment/Daemons
+Requires: %{name} = %{version}-%{release}
+
+%description  msrp-modules
+OpenSIPS is a very fast and flexible SIP (RFC3261)
+server. Written entirely in C, OpenSIPS can handle thousands calls
+per second even on low-budget hardware.
+.
+This package provides the MSRP protocol support for OpenSIPS.
+
 %package  mysql-module
 Summary:  MySQL database connectivity module for OpenSIPS
 Group:    System Environment/Daemons
@@ -615,9 +633,7 @@ module to publish RabbitMQ messages to a RabbitMQ server.
 Summary:  Radius modules for OpenSIPS
 Group:    System Environment/Daemons
 Requires: %{name} = %{version}-%{release}
-%if 0%{!?_without_aaa_radius:1}
-BuildRequires:  radiusclient-ng-devel
-%endif
+BuildRequires:  radcli-devel
 
 %description  radius-modules
 OpenSIPS is a very fast and flexible SIP (RFC3261)
@@ -933,13 +949,6 @@ mv %{buildroot}/%{_sysconfdir}/opensips/tls/README \
 rm -f %{buildroot}%{_docdir}/opensips/INSTALL
 mv %{buildroot}/%{_docdir}/opensips docdir
 
-# recode documentation
-for i in docdir/*; do
-  mv -f $i $i.old
-  iconv -f iso8859-1 -t UTF-8 $i.old > $i
-  rm -f $i.old
-done
-
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
 # install systemd files
 install -D -m 0644 -p packaging/redhat_fedora/%{name}.service %{buildroot}%{_unitdir}/%{name}.service
@@ -1003,9 +1012,7 @@ fi
 %attr(755,root,root) %{_initrddir}/opensips
 %endif
 
-%if 0%{!?_without_aaa_radius:1}
 %config(noreplace) %{_sysconfdir}/opensips/dictionary.opensips
-%endif
 %config(noreplace) %{_sysconfdir}/sysconfig/%{name}
 %attr(640,%{name},%{name}) %config(noreplace) %{_sysconfdir}/opensips/opensips.cfg
 %attr(640,%{name},%{name}) %config(noreplace) %{_sysconfdir}/opensips/scenario_callcenter.xml
@@ -1037,18 +1044,17 @@ fi
 %doc docdir/AUTHORS
 %doc docdir/NEWS
 %doc docdir/README
-%doc docdir/README-MODULES
 %doc COPYING
 
 %{_libdir}/opensips/modules/acc.so
 %{_libdir}/opensips/modules/alias_db.so
-%{_libdir}/opensips/modules/auth.so
 %{_libdir}/opensips/modules/auth_aaa.so
 %{_libdir}/opensips/modules/auth_db.so
 %{_libdir}/opensips/modules/avpops.so
 %{_libdir}/opensips/modules/b2b_entities.so
 %{_libdir}/opensips/modules/b2b_logic.so
 %{_libdir}/opensips/modules/b2b_sca.so
+%{_libdir}/opensips/modules/b2b_sdp_demux.so
 %{_libdir}/opensips/modules/benchmark.so
 %{_libdir}/opensips/modules/cachedb_local.so
 %{_libdir}/opensips/modules/cachedb_sql.so
@@ -1120,6 +1126,7 @@ fi
 %{_libdir}/opensips/modules/sip_i.so
 %{_libdir}/opensips/modules/sipcapture.so
 %{_libdir}/opensips/modules/sipmsgops.so
+%{_libdir}/opensips/modules/status_report.so
 %{_libdir}/opensips/modules/tracer.so
 %{_libdir}/opensips/modules/sl.so
 %{_libdir}/opensips/modules/speeddial.so
@@ -1127,11 +1134,11 @@ fi
 %{_libdir}/opensips/modules/sst.so
 %{_libdir}/opensips/modules/statistics.so
 %{_libdir}/opensips/modules/stun.so
+%{_libdir}/opensips/modules/tcp_mgm.so
 %{_libdir}/opensips/modules/textops.so
 %{_libdir}/opensips/modules/tm.so
 %{_libdir}/opensips/modules/topology_hiding.so
 %{_libdir}/opensips/modules/uac.so
-%{_libdir}/opensips/modules/uac_auth.so
 %{_libdir}/opensips/modules/uac_redirect.so
 %{_libdir}/opensips/modules/uac_registrant.so
 %{_libdir}/opensips/modules/userblacklist.so
@@ -1139,13 +1146,13 @@ fi
 
 %doc docdir/README.acc
 %doc docdir/README.alias_db
-%doc docdir/README.auth
 %doc docdir/README.auth_aaa
 %doc docdir/README.auth_db
 %doc docdir/README.avpops
 %doc docdir/README.b2b_entities
 %doc docdir/README.b2b_logic
 %doc docdir/README.b2b_sca
+%doc docdir/README.b2b_sdp_demux
 %doc docdir/README.benchmark
 %doc docdir/README.cachedb_local
 %doc docdir/README.cachedb_sql
@@ -1213,6 +1220,7 @@ fi
 %doc docdir/README.sip_i
 %doc docdir/README.sipcapture
 %doc docdir/README.sipmsgops
+%doc docdir/README.status_report
 %doc docdir/README.tracer
 %doc docdir/README.sl
 %doc docdir/README.speeddial
@@ -1220,12 +1228,12 @@ fi
 %doc docdir/README.sst
 %doc docdir/README.statistics
 %doc docdir/README.stun
+%doc docdir/README.tcp_mgm
 %doc docdir/README.textops
 %doc docdir/README.tls
 %doc docdir/README.tm
 %doc docdir/README.topology_hiding
 %doc docdir/README.uac
-%doc docdir/README.uac_auth
 %doc docdir/README.uac_redirect
 %doc docdir/README.uac_registrant
 %doc docdir/README.userblacklist
@@ -1237,9 +1245,11 @@ fi
 %doc docdir/README.auth_jwt
 %endif
 
-%files b2bua-module
-%{_libdir}/opensips/modules/b2b_logic_xml.so
-%doc docdir/README.b2b_logic_xml
+%files auth-modules
+%{_libdir}/opensips/modules/auth.so
+%{_libdir}/opensips/modules/uac_auth.so
+%doc docdir/README.auth
+%doc docdir/README.uac_auth
 
 %files berkeley-bin
 %{_sbindir}/bdb_recover
@@ -1347,6 +1357,16 @@ fi
 %{_libdir}/opensips/modules/cachedb_mongodb.so
 %doc docdir/README.cachedb_mongodb
 %endif
+
+%files msrp-modules
+%{_libdir}/opensips/modules/msrp_gateway.so
+%{_libdir}/opensips/modules/msrp_relay.so
+%{_libdir}/opensips/modules/msrp_ua.so
+%{_libdir}/opensips/modules/proto_msrp.so
+%doc docdir/README.msrp_gateway
+%doc docdir/README.msrp_relay
+%doc docdir/README.msrp_ua
+%doc docdir/README.proto_msrp
 
 %files mysql-module
 %{_libdir}/opensips/modules/db_mysql.so
@@ -1461,10 +1481,8 @@ fi
 %files radius-modules
 %{_libdir}/opensips/modules/peering.so
 %doc docdir/README.peering
-%if 0%{!?_without_aaa_radius:1}
 %{_libdir}/opensips/modules/aaa_radius.so
 %doc docdir/README.aaa_radius
-%endif
 
 %if 0%{?_with_cachedb_redis:1}
 %files redis-module
@@ -1561,8 +1579,51 @@ fi
 
 
 %changelog
-* Tue Aug 17 2021 Nick Altmann <nick@altmann.pro> - 3.3.0-1
+* Wed Aug 21 2024 Liviu Chircu <liviu@opensips.org> - 3.4.8-1
+- OpenSIPS minor stable release: 3.4.8-1
+
+* Tue Aug 20 2024 Razvan Crainea <razvan@opensips.org> - 3.4.7-1
+- Add python-setuptools dependency
+
+* Mon Aug 19 2024 Razvan Crainea <razvan@opensips.org> - 3.4.7-1
+- Replace deprecated dependency for radius modules
+
+* Wed Jul 24 2024 Liviu Chircu <liviu@opensips.org> - 3.4.7-1
+- OpenSIPS minor stable release: 3.4.7-1
+
+* Wed Jun 19 2024 Liviu Chircu <liviu@opensips.org> - 3.4.6-1
+- OpenSIPS minor stable release: 3.4.6-1
+
+* Thu Apr 18 2024 Liviu Chircu <liviu@opensips.org> - 3.4.5-1
+- OpenSIPS minor stable release: 3.4.5-1
+
+* Wed Feb 21 2024 Liviu Chircu <liviu@opensips.org> - 3.4.4-1
+- OpenSIPS minor stable release: 3.4.4-1
+
+* Wed Dec 20 2023 Liviu Chircu <liviu@opensips.org> - 3.4.3-1
+- OpenSIPS minor stable release: 3.4.3-1
+
+* Wed Oct 18 2023 Liviu Chircu <liviu@opensips.org> - 3.4.2-1
+- OpenSIPS minor stable release: 3.4.2-1
+
+* Thu Aug 31 2023 Liviu Chircu <liviu@opensips.org> - 3.4.1-1
+- OpenSIPS minor stable release: 3.4.1-1
+
+* Wed Jul 19 2023 Liviu Chircu <liviu@opensips.org> - 3.4.0-1
+- OpenSIPS 3.4.0 stable release: 3.4.0-1
+
+* Tue Jun 20 2023 Liviu Chircu <liviu@opensips.org> - 3.4.0-rc1-1
+- OpenSIPS 3.4 new release candidate: 3.4.0-rc1-1
+
+* Thu May 18 2023 Nick Altmann <nick@altmann.pro> - 3.4.0-1
+- Specification updated for opensips 3.4
+
+* Wed May 18 2022 Nick Altmann <nick@altmann.pro> - 3.3.0-1
 - Specification updated for opensips 3.3
+- New modules: b2b_sdp_demux, msrp_gateway, msrp_relay, msrp_ua, proto_msrp, status_report, tcp_mgm
+- New packages: msrp-modules
+- Removed modules: b2b_logic_xml
+- Removed packages: b2bua-module
 
 * Thu May 27 2021 Nick Altmann <nick@altmann.pro> - 3.2.0-1
 - Specification updated for opensips 3.2

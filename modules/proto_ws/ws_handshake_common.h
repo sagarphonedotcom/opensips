@@ -103,7 +103,7 @@
 	"Sec-WebSocket-Protocol: " WS_PROTO_SIP HTTP_END
 #define HTTP_HANDSHAKE_END_LEN (sizeof(HTTP_HANDSHAKE_END) - 1)
 
-#define MAX_HOST_LEN IP_ADDR_MAX_STR_SIZE /*IP*/ + 1 /*':'*/ + 5 /*65535*/
+#define MAX_HOST_LEN IP_ADDR_MAX_STR_SIZE /*IP*/ + 2 /* '[' & ']' for ipv6 */ + 1 /*':'*/ + 5 /*65535*/
 
 #include "../../sha1.h"
 
@@ -296,8 +296,11 @@ static inline int ws_client_handshake(struct tcp_connection *con)
 			goto error;
 		}
 
+		int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
+			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : _ws_common_max_msg_chunks;
+
 		con->msg_attempts++;
-		if (con->msg_attempts == _ws_common_max_msg_chunks) {
+		if (con->msg_attempts == max_chunks) {
 			LM_ERR("Made %u read attempts but message is not complete yet - "
 				   "closing connection \n",con->msg_attempts);
 			goto error;
@@ -326,7 +329,7 @@ static inline int ws_client_handshake(struct tcp_connection *con)
 	}
 
 	/* update the timeout - we successfully read the request */
-	tcp_conn_set_lifetime(con, tcp_con_lifetime);
+	tcp_conn_reset_lifetime(con);
 	con->timeout=con->lifetime;
 
 	con->rcv.proto_reserved1=con->id; /* copy the id */
@@ -395,7 +398,7 @@ error:
 
 static int ws_server_handshake(struct tcp_connection *con)
 {
-	int bytes, total_bytes = 0;
+	int bytes;
 	long size = 0;
 	int msg_len;
 	char *msg_buf;
@@ -429,7 +432,6 @@ static int ws_server_handshake(struct tcp_connection *con)
 			goto error;
 		}
 
-		total_bytes+=bytes;
 		/* eof check:
 		 * is EOF if eof on fd and r.  not complete yet,
 		 * if r. is complete we might have a second unparsed
@@ -465,7 +467,7 @@ static int ws_server_handshake(struct tcp_connection *con)
 		}
 
 		/* update the timeout - we successfully read the request */
-		tcp_conn_set_lifetime( con, tcp_con_lifetime);
+		tcp_conn_reset_lifetime(con);
 		con->timeout=con->lifetime;
 
 		con->rcv.proto_reserved1=con->id; /* copy the id */
@@ -521,8 +523,10 @@ static int ws_server_handshake(struct tcp_connection *con)
 		}
 
 		con->msg_attempts = 0;
-		if (req != &_ws_common_tcp_current_req)
-			pkg_free(req);
+		if (req != &_ws_common_tcp_current_req) {
+			shm_free(req);
+			con->con_req = NULL;
+		}
 
 		/* handshake now completed, destroy the handshake data */
 		WS_STATE(con) = WS_CON_HANDSHAKE_DONE;
@@ -531,10 +535,13 @@ static int ws_server_handshake(struct tcp_connection *con)
 		goto done;
 
 	} else {
+		int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
+			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : _ws_common_max_msg_chunks;
+
 		/* request not complete - check the if the thresholds are exceeded */
 
 		con->msg_attempts++;
-		if (con->msg_attempts == _ws_common_max_msg_chunks) {
+		if (con->msg_attempts == max_chunks) {
 			LM_ERR("Made %u read attempts but message is not complete yet - "
 				   "closing connection \n",con->msg_attempts);
 			goto error;
@@ -544,7 +551,7 @@ static int ws_server_handshake(struct tcp_connection *con)
 	if (!req->complete && (req == &_ws_common_tcp_current_req)) {
 		/* let's duplicate this - most likely another conn will come in */
 
-		con->con_req = pkg_malloc(sizeof(struct tcp_req));
+		con->con_req = shm_malloc(sizeof(struct tcp_req));
 		if (con->con_req == NULL) {
 			LM_ERR("No more mem for dynamic con request buffer\n");
 			goto error;
@@ -591,7 +598,7 @@ error:
 	if (WS_STATE(con) == WS_CON_BAD_REQ)
 		ws_bad_handshake(con);
 	if (req != &_ws_common_tcp_current_req) {
-		pkg_free(req);
+		shm_free(req);
 		con->con_req = NULL;
 	}
 	return -1;
@@ -839,7 +846,7 @@ static int ws_parse_req_handshake(struct tcp_connection *c, char *msg, int len)
 	tmp_msg.buf = tmp_msg.unparsed = msg;
 	if (parse_headers(&tmp_msg, HDR_EOH_F, 0) < 0) {
 		LM_ERR("cannot parse headers\n%.*s\n", len, msg);
-		goto error;
+		goto ws_error;
 	}
 	/* verify headers according to RFC6455 */
 	for (hf = tmp_msg.headers; hf; hf = hf->next) {
@@ -1036,14 +1043,14 @@ static int ws_complete_handshake(struct tcp_connection *c)
 	str trace_str = { ws_trace_buf, 0 };
 	int iov_len = sizeof(iov) / sizeof(struct iovec), i;
 
-	reset_tcp_vars(tcpthreshold);
-	start_expire_timer(get, tcpthreshold);
+	reset_tcp_vars(c->profile.send_threshold);
+	start_expire_timer(get, c->profile.send_threshold);
 
 	/* compute the ws_key in ws_accept_buf */
 	ws_compute_key(&WS_KEY(c));
 
 	n = _ws_common_writev(c, c->fd, iov, 3, _ws_common_write_tout);
-	stop_expire_timer(get, tcpthreshold,
+	stop_expire_timer(get, c->profile.send_threshold,
 			_ws_common_module " handshake", "", 0, 1);
 
 	if ( ((struct ws_data *) c->proto_data)->dest ) {
@@ -1076,10 +1083,10 @@ static int ws_bad_handshake(struct tcp_connection *c)
 
 	str trace_str = { WS_HTTP_BAD_REQ, WS_HTTP_BAD_REQ_LEN };
 
-	reset_tcp_vars(tcpthreshold);
-	start_expire_timer(get, tcpthreshold);
+	reset_tcp_vars(c->profile.send_threshold);
+	start_expire_timer(get, c->profile.send_threshold);
 	n = _ws_common_writev(c, c->fd, iov, 1, _ws_common_write_tout);
-	stop_expire_timer(get, tcpthreshold,
+	stop_expire_timer(get, c->profile.send_threshold,
 			_ws_common_module " handshake", "", 0, 1);
 
 	if ( ((struct ws_data *) c->proto_data)->dest ) {
@@ -1117,7 +1124,7 @@ static int ws_parse_rpl_handshake(struct tcp_connection *c, char *msg, int len)
 	tmp_msg.buf = tmp_msg.unparsed = msg;
 	if (parse_headers(&tmp_msg, HDR_EOH_F, 0) < 0) {
 		LM_ERR("cannot parse headers\n%.*s\n", len, msg);
-		goto error;
+		goto ws_error;
 	}
 	/* verify headers according to RFC6455 */
 	for (hf = tmp_msg.headers; hf; hf = hf->next) {
@@ -1266,6 +1273,7 @@ static int ws_start_handshake(struct tcp_connection *c)
 	char *port;
 	int port_len;
 	static char host_orig_buf[MAX_HOST_LEN];
+	char *h;
 
 	str trace_str = { ws_trace_buf, 0 };
 
@@ -1290,27 +1298,34 @@ static int ws_start_handshake(struct tcp_connection *c)
 
 	int iov_len = sizeof(iov) / sizeof(struct iovec);
 
-	reset_tcp_vars(tcpthreshold);
-	start_expire_timer(get, tcpthreshold);
+	reset_tcp_vars(c->profile.send_threshold);
+	start_expire_timer(get, c->profile.send_threshold);
 
 	ip = ip_addr2a(&c->rcv.src_ip);
 	port = int2str(c->rcv.src_port, &port_len);
 	n = strlen(ip);
-	memcpy(host_orig_buf, ip, n);
-	host_orig_buf[n] = ':';
-	memcpy(host_orig_buf + n + 1, port, port_len);
+	h = host_orig_buf;
+	if (c->rcv.src_ip.af == AF_INET6)
+		*h++ = '[';
+	memcpy(h, ip, n);
+	h += n;
+	if (c->rcv.src_ip.af == AF_INET6)
+		*h++ = ']';
+	*h++ = ':';
+	memcpy(h, port, port_len);
+	h += port_len;
 
 	iov[2].iov_base = _ws_common_resource.s;
 	iov[2].iov_len = _ws_common_resource.len;
 
-	iov[7].iov_len = n + port_len + 1;
+	iov[7].iov_len = h - host_orig_buf;
 	iov[10].iov_len = iov[7].iov_len;
 
 	iov[13].iov_base = WS_KEY(c).s;
 	iov[13].iov_len = WS_KEY(c).len;
 
 	n = _ws_common_writev(c, c->fd, iov, 16, _ws_common_write_tout);
-	stop_expire_timer(get, tcpthreshold,
+	stop_expire_timer(get, c->profile.send_threshold,
 			_ws_common_module " start handshake", "", 0, 1);
 
 	if ( ((struct ws_data *) c->proto_data)->dest ) {
@@ -1647,10 +1662,10 @@ static int trace_ws( struct tcp_connection* conn, trans_trace_event event, str* 
 			!WS_TRACE_IS_ON(conn) || ! (d = conn->proto_data) )
 		return 0;
 
-	if ( d->trace_route_id != -1 ) {
-		check_trace_route( d->trace_route_id, conn );
+	if ( ref_script_route_is_valid(d->trace_route_ref) ) {
+		check_trace_route( d->trace_route_ref, conn );
 		/* avoid doing this multiple times */
-		d->trace_route_id = -1;
+		d->trace_route_ref = NULL;
 	}
 
 	/* check if tracing is deactivated from the route for this connection */

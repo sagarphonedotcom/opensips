@@ -31,11 +31,6 @@
 static inline int trace_tls( struct tcp_connection* conn, SSL* ctx,
 	trans_trace_event event, trans_trace_status status, str* data);
 
-#define TRACE_IS_ON( CONN ) (CONN->proto_data && \
-		((struct tls_data*)CONN->proto_data)->tprot && \
-			((struct tls_data*)CONN->proto_data)->dest && \
-			*((struct tls_data*)CONN->proto_data)->trace_is_on)
-
 static inline void tls_append_cert_info(X509* cert, char client, trace_message message, trace_proto_t* tprot)
 {
 	str subj, issuer;
@@ -100,39 +95,19 @@ static void add_certificates( SSL* ssl, struct tls_data* data)
 	tls_append_cert_info(cert, 0/* server */, data->message, data->tprot);
 }
 
-void tls_send_trace_data(struct tcp_connection *c, trace_dest t_dst) {
-	struct tls_data* data;
-
-	if ( (c->flags&F_CONN_ACCEPTED)==0 && c->proto_flags & F_TLS_TRACE_READY ) {
-		data = c->proto_data;
-
-		/* send the message if set from tls_mgm */
-		if ( data->message ) {
-			send_trace_message( data->message, t_dst);
-			data->message = NULL;
-		}
-
-		/* don't allow future traces for this connection */
-		data->tprot = 0;
-		data->dest  = 0;
-
-		c->proto_flags &= ~( F_TLS_TRACE_READY );
-	}
-}
-
 static inline int trace_tls( struct tcp_connection* conn, SSL* ctx,
 		trans_trace_event event, trans_trace_status status, str* message)
 {
 	struct tls_data* data;
 	union sockaddr_union src, dst;
 
-	if ( !conn || !TRACE_IS_ON(conn) || !(data=conn->proto_data) )
+	if ( !conn || !TLS_TRACE_IS_ON(conn) || !(data=conn->proto_data) )
 		return 0;
 
-	if ( data->trace_route_id != -1 ) {
-		check_trace_route( data->trace_route_id, conn );
+	if ( data->trace_route_ref ) {
+		check_trace_route( data->trace_route_ref, conn );
 		/* avoid doing this multiple times */
-		data->trace_route_id = -1;
+		data->trace_route_ref = NULL;
 	}
 
 	/* check if tracing is deactivated from the route for this connection */

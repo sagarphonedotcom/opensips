@@ -20,8 +20,9 @@
 
 log_level=3
 xlog_level=3
-log_stderror=no
-log_facility=LOG_LOCAL0
+stderror_enabled=no
+syslog_enabled=yes
+syslog_facility=LOG_LOCAL0
 
 udp_workers=4
 
@@ -133,6 +134,7 @@ loadmodule "proto_udp.so"
 
 ifelse(ENABLE_TCP, `yes', `loadmodule "proto_tcp.so"' , `')
 ifelse(ENABLE_TLS, `yes', `loadmodule "proto_tls.so"
+loadmodule "tls_wolfssl.so"
 loadmodule "tls_mgm.so"
 modparam("tls_mgm","server_domain", "default")
 modparam("tls_mgm","match_ip_address", "[default]*")

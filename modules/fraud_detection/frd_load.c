@@ -247,6 +247,7 @@ static int create_time_rec(const str *time_start, const str *time_end,
 	memset(trx, 0, sizeof *trx);
 	trx->is_leaf = 1;
 
+	tmrec_init(trec);
 	trec->duration = (end_h * 3600 + end_m * 60) -
 		(trec->ts.tm_hour * 3600 + trec->ts.tm_min * 60);
 	trec->ts.tm_isdst = -1 /*daylight*/;
@@ -375,7 +376,7 @@ static int frd_load_data(dr_head_p drp, free_list_t **fl)
 			}
 			pid = VAL_INT(values + 1);
 
-			get_str_from_dbval(prefix_col.s, values + 2, 1, 1, prefix, null_val);
+			get_str_from_dbval(prefix_col.s, values + 2, 1, 0, prefix, null_val);
 			get_str_from_dbval(start_h_col.s, values + 3, 1, 1, start_time, null_val);
 			get_str_from_dbval(end_h_col.s, values + 4, 1, 1, end_time, null_val);
 			get_str_from_dbval(days_col.s, values + 5, 1, 1, days, null_val);

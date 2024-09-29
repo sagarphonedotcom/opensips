@@ -28,9 +28,11 @@
 
 #include "../mi/mi.h"
 #include "tcp_conn_defs.h"
-#include "net_tcp_dbg.h"
+#include "tcp_conn_profile.h"
 
 #define TCP_PARTITION_SIZE 32
+
+extern int tcp_workers_max_no;
 
 /**************************** Control functions ******************************/
 
@@ -77,7 +79,7 @@ mi_response_t *mi_tcp_list_conns(const mi_params_t *params,
 int tcp_init_listener(struct socket_info *si);
 
 /* helper function to set all TCP related options to a socket */
-int tcp_init_sock_opt(int s);
+int tcp_init_sock_opt(int s, struct tcp_conn_profile *prof, enum si_flags socketflags);
 
 /********************** TCP conn management functions ************************/
 
@@ -89,7 +91,8 @@ int tcp_conn_get(int unsigned id, struct ip_addr* ip, int port,
 
 /* creates a new tcp conn around a newly connected socket */
 struct tcp_connection* tcp_conn_create(int sock, union sockaddr_union* su,
-		struct socket_info* si, int state, int send2main);
+		struct socket_info* si, struct tcp_conn_profile *prof,
+		int state, int send2main);
 
 /* sends a connected connection to the master */
 int tcp_conn_send(struct tcp_connection *con);
@@ -105,6 +108,8 @@ int tcp_conn_fcntl(struct receive_info *rcv, int attr, void *value);
 
 /* returns the correlation ID of a TCP connection */
 int tcp_get_correlation_id( unsigned int id, unsigned long long *cid);
+
+int tcp_done_reading(struct tcp_connection* c);
 
 extern unsigned int last_outgoing_tcp_id;
 

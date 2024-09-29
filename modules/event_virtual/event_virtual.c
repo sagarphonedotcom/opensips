@@ -50,7 +50,7 @@ static gen_lock_t *global_lock;
 static gen_lock_t *rrobin_lock;
 
 /* module parameters */
-static param_export_t mod_params[] = {
+static const param_export_t mod_params[] = {
 	{"failover_timeout", INT_PARAM, &failover_timeout},
 	{0,0,0}
 };
@@ -78,7 +78,7 @@ struct module_exports exports = {
 	0					/* reload confirm function */
 };
 
-static evi_export_t trans_export_virtual = {
+static const evi_export_t trans_export_virtual = {
 	VIRT_STR,					/* transport module name */
 	virtual_raise,					/* raise function */
 	virtual_parse,					/* parse function */
@@ -466,6 +466,7 @@ static int failover_raise(struct sip_msg *msg, str *ev_name,
 
 				cb_param->evi_params = evi_dup_shm_params(params);
 				if (!cb_param->evi_params) {
+					lock_release(cur_sock->lock);
 					LM_ERR("Failed to dup evi params in shm\n");
 					shm_free(cb_param);
 					return -1;
@@ -616,6 +617,7 @@ static int virtual_raise(struct sip_msg *msg, str* ev_name, evi_reply_sock *sock
 				LM_ERR("unable to parse socket %.*s\n",
 						vsock->current_sock->sock_str.len,
 						vsock->current_sock->sock_str.s);
+				lock_release(rrobin_lock);
 				return -1;
 			}
 
@@ -623,6 +625,7 @@ static int virtual_raise(struct sip_msg *msg, str* ev_name, evi_reply_sock *sock
 				vsock->current_sock->sock, params, &async_status)) {
 				LM_ERR("unable to raise socket %.*s\n",
 						vsock->current_sock->sock_str.len, vsock->current_sock->sock_str.s);
+				lock_release(rrobin_lock);
 				return -1;
 			}
 
@@ -650,8 +653,10 @@ static void virtual_free(evi_reply_sock *sock) {
 	lock_get(global_lock);
 
 	vsock = (struct virtual_socket *)sock->params;
-	if (!vsock)
+	if (!vsock) {
+		lock_release(global_lock);
 		return;
+	}
 
 	/* free the list of sockets for this virtual socket */
 	sub_list = vsock->list_sockets;

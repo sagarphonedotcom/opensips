@@ -28,7 +28,8 @@
 
 #define RL_DEFAULT_EXPIRE	3600
 #define RL_HASHSIZE			1024
-#define RL_TIMER_INTERVAL	10
+#define RL_TIMER_INTERVAL	10   /* s */
+#define RL_TIMER_BCAST		200  /* ms */
 #define RL_PIPE_PENDING		(1<<0)
 #define BIN_VERSION         1
 
@@ -147,7 +148,7 @@ void do_update_load(void);
 void pid_setpoint_limit(int);
 
 /* timer */
-void rl_timer(unsigned int, void *);
+void rl_timer(utime_t, void *);
 void rl_timer_repl(utime_t, void *);
 
 /* cachedb functions */

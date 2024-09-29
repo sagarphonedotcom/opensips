@@ -52,6 +52,13 @@
 		for that specific branch.
 	</para>
 	<para>
+		Starting with &osips; 3.3, branches can be identified based
+		on their participant's to_tag. This features becomes handy when
+		using <emphasis>rtp_relay</emphasis> in B2B mode, where peers
+		can no longer be identified simply by an index. However, this
+		feature works in dialog secenatios as well.
+	</para>
+	<para>
 		The multiple branches behavior is handled differently by the
 		back-end engine, depending on its capabilities. For example,
 		<emphasis>rtpengine</emphasis> is able to natively support calls
@@ -343,9 +350,9 @@ $ opensips-cli -x mi rtp_relay_update_callid callid=1-3758963@127.0.0.1 \
 			<para>
 				Is used to provision the RTP back-end flags for the
 				current peer - if used in the initial INVITE
-				REQUEST/BRANCH route, it provisions the flags of the
-				caller, whereas if used in the initial INVITE REPLY,
-				it provisions the callee's flags.
+				REQUEST route, it provisions the flags of the
+				caller, whereas if used in the initial INVITE BRANCH/REPLY
+				route, it provisions the callee's flags.
 			</para>
 			<para>
 				For a sequential request, the variable represents the
@@ -370,8 +377,7 @@ $ opensips-cli -x mi rtp_relay_update_callid callid=1-3758963@127.0.0.1 \
 					with the other UAC/peer
 					</para></listitem>
 					<listitem><para><emphasis>ip</emphasis> - the IP that should be
-					advertised in the resulted SDP (currently only used by <emphasis>
-					rtpproxy</emphasis>)
+					advertised in the resulted SDP.
 					</para></listitem>
 					<listitem><para><emphasis>type</emphasis> - the RTP type used
 					by the current UAC (currently only used by <emphasis>
@@ -379,6 +385,12 @@ $ opensips-cli -x mi rtp_relay_update_callid callid=1-3758963@127.0.0.1 \
 					</para></listitem>
 					<listitem><para><emphasis>iface</emphasis> - the interface
 					used for the traffic coming from this UAC.
+					</para></listitem>
+					<listitem><para><emphasis>body</emphasis> - the body to be used
+					for the UAC.
+					</para></listitem>
+					<listitem><para><emphasis>delete</emphasis> - flags to be used
+					when the media session is terminated/deleted.
 					</para></listitem>
 					<listitem><para><emphasis>disabled</emphasis> - provisioned
 					as an integer, it is used to disable RTP relay for this UAC.
@@ -393,6 +405,37 @@ $ opensips-cli -x mi rtp_relay_update_callid callid=1-3758963@127.0.0.1 \
 				<xref linkend="pv_rtp_relay"/> variable, except that it
 				is used to provision the other UAC's flags, except the
 				current one. All other fields are similar.
+			</para>
+		</section>
+		<section id="pv_rtp_relay_ctx" xreflabel="$rtp_relay_ctx">
+			<title><varname>$rtp_relay_ctx()</varname></title>
+			<para>
+				This variable can be used to provide information about the
+				RTP context, information that is not associated with any of
+				the involved peers.
+			</para>
+			<para>
+				The following settings can be used:
+				<itemizedlist>
+					<listitem><para><emphasis>callid</emphasis> - The callid
+					to be used for all communication with the rtp server.
+					If not specified, it is taken from the message/dialog.
+					</para></listitem>
+					<listitem><para><emphasis>from_tag</emphasis> - The from-tag
+					to be used for all communication with the rtp server.
+					If not specified, it is taken from the message/dialog.
+					</para></listitem>
+					<listitem><para><emphasis>to_tag</emphasis> - The to-tag
+					to be used for all communication with the rtp server.
+					If not specified, it is taken from the message/dialog.
+					</para></listitem>
+					<listitem><para><emphasis>flags</emphasis> - Generic flags
+					to be sent to all offer/answer requests.
+					</para></listitem>
+					<listitem><para><emphasis>delete</emphasis> - flags sent
+					when the relay session is terminated.
+					</para></listitem>
+				</itemizedlist>
 			</para>
 		</section>
 	</section>

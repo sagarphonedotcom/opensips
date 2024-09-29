@@ -15,13 +15,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
 
 #include "../reactor_defs.h"
 #include "net_tcp.h"
 #include "tcp_common.h"
+#include "tcp_conn_profile.h"
 #include "../tsend.h"
 
 /*! \brief blocking connect on a non-blocking fd; it will timeout after
@@ -30,7 +31,7 @@
  * use select() instead of poll (bad if fd > FD_SET_SIZE, poll is preferred)
  */
 int tcp_connect_blocking_timeout(int fd, const struct sockaddr *servaddr,
-											socklen_t addrlen, int timeout)
+											socklen_t addrlen, int timeout_ms)
 {
 	int n;
 #if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
@@ -50,7 +51,7 @@ int tcp_connect_blocking_timeout(int fd, const struct sockaddr *servaddr,
 	unsigned short port;
 
 	poll_err=0;
-	to = timeout*1000;
+	to = timeout_ms * 1000;
 
 	if (gettimeofday(&(begin), NULL)) {
 		LM_ERR("Failed to get TCP connect start time\n");
@@ -112,7 +113,12 @@ again:
 #endif
 		{
 			err_len=sizeof(err);
-			getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+			if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+				get_su_info( servaddr, ip, port);
+				LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n", fd,
+						ip, port, errno, strerror(errno));
+				goto error;
+			}
 			if ((err==0) && (poll_err==0)) goto end;
 			if (err!=EINPROGRESS && err!=EALREADY){
 				get_su_info( servaddr, ip, port);
@@ -125,7 +131,7 @@ again:
 error_timeout:
 	/* timeout */
 	LM_ERR("connect timed out, %d us elapsed out of %d us\n", elapsed,
-		timeout*1000);
+		timeout_ms * 1000);
 error:
 	return -1;
 end:
@@ -139,7 +145,8 @@ int tcp_connect_blocking(int fd, const struct sockaddr *servaddr,
 			tcp_connect_timeout);
 }
 
-int tcp_sync_connect_fd(union sockaddr_union* src, union sockaddr_union* dst)
+int tcp_sync_connect_fd(union sockaddr_union* src, union sockaddr_union* dst,
+                 enum sip_protos proto, struct tcp_conn_profile *prof, enum si_flags flags)
 {
 	int s;
 	union sockaddr_union my_name;
@@ -150,21 +157,25 @@ int tcp_sync_connect_fd(union sockaddr_union* src, union sockaddr_union* dst)
 		LM_ERR("socket: (%d) %s\n", errno, strerror(errno));
 		goto error;
 	}
-	if (tcp_init_sock_opt(s)<0){
+
+	if (tcp_init_sock_opt(s, prof, flags)<0){
 		LM_ERR("tcp_init_sock_opt failed\n");
 		goto error;
 	}
+
 	if (src) {
 		my_name_len = sockaddru_len(*src);
 		memcpy( &my_name, src, my_name_len);
-		su_setport( &my_name, 0);
+		if (!(flags & SI_REUSEPORT))
+			su_setport( &my_name, 0);
 		if (bind(s, &my_name.s, my_name_len )!=0) {
 			LM_ERR("bind failed (%d) %s\n", errno,strerror(errno));
 			goto error;
 		}
 	}
 
-	if (tcp_connect_blocking(s, &dst->s, sockaddru_len(*dst))<0){
+	if (tcp_connect_blocking_timeout(s, &dst->s, sockaddru_len(*dst),
+	                prof->connect_timeout)<0){
 		LM_ERR("tcp_blocking_connect failed\n");
 		goto error;
 	}
@@ -176,16 +187,17 @@ error:
 }
 
 struct tcp_connection* tcp_sync_connect(struct socket_info* send_sock,
-		union sockaddr_union* server, int *fd, int send2main)
+               union sockaddr_union* server, struct tcp_conn_profile *prof,
+               int *fd, int send2main)
 {
 	struct tcp_connection* con;
 	int s;
 
-	s = tcp_sync_connect_fd(&send_sock->su, server);
+	s = tcp_sync_connect_fd(&send_sock->su, server, send_sock->proto, prof, send_sock->flags);
 	if (s < 0)
 		return NULL;
 
-	con=tcp_conn_create(s, server, send_sock, S_CONN_OK, send2main);
+	con=tcp_conn_create(s, server, send_sock, prof, S_CONN_OK, send2main);
 	if (con==NULL){
 		LM_ERR("tcp_conn_create failed, closing the socket\n");
 		close(s);
@@ -196,8 +208,8 @@ struct tcp_connection* tcp_sync_connect(struct socket_info* send_sock,
 }
 
 int tcp_async_connect(struct socket_info* send_sock,
-					union sockaddr_union* server, int timeout,
-					struct tcp_connection** c, int *ret_fd, int send2main)
+            union sockaddr_union* server, struct tcp_conn_profile *prof,
+            int timeout, struct tcp_connection** c, int *ret_fd, int send2main)
 {
 	int fd, n;
 	union sockaddr_union my_name;
@@ -224,13 +236,16 @@ int tcp_async_connect(struct socket_info* send_sock,
 		LM_ERR("socket: (%d) %s\n", errno, strerror(errno));
 		return -1;
 	}
-	if (tcp_init_sock_opt(fd)<0){
+
+	if (tcp_init_sock_opt(fd, prof, send_sock->flags)<0){
 		LM_ERR("tcp_init_sock_opt failed\n");
 		goto error;
 	}
+
 	my_name_len = sockaddru_len(send_sock->su);
 	memcpy( &my_name, &send_sock->su, my_name_len);
-	su_setport( &my_name, 0);
+	if (!(send_sock->flags & SI_REUSEPORT))
+		su_setport( &my_name, 0);
 	if (bind(fd, &my_name.s, my_name_len )!=0) {
 		LM_ERR("bind failed (%d) %s\n", errno,strerror(errno));
 		goto error;
@@ -306,7 +321,12 @@ again:
 #endif
 		{
 			err_len=sizeof(err);
-			getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+			if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+				get_su_info(&server->s, ip, port);
+				LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n", fd,
+						ip, port, errno, strerror(errno));
+				goto error;
+			}
 			if ((err==0) && (poll_err==0)) goto local_connect;
 			if (err!=EINPROGRESS && err!=EALREADY){
 				get_su_info(&server->s, ip, port);
@@ -320,7 +340,8 @@ again:
 async_connect:
 	LM_DBG("Create connection for async connect\n");
 	/* create a new dummy connection */
-	con=tcp_conn_create(fd, server, send_sock, S_CONN_CONNECTING, send2main);
+	con=tcp_conn_create(fd, server, send_sock,
+	                    prof, S_CONN_CONNECTING, send2main);
 	if (con==NULL) {
 		LM_ERR("tcp_conn_create failed\n");
 		goto error;
@@ -330,7 +351,7 @@ async_connect:
 	return 0;
 
 local_connect:
-	con=tcp_conn_create(fd, server, send_sock, S_CONN_OK, send2main);
+	con=tcp_conn_create(fd, server, send_sock, prof, S_CONN_OK, send2main);
 	if (con==NULL) {
 		LM_ERR("tcp_conn_create failed, closing the socket\n");
 		goto error;
@@ -390,13 +411,11 @@ int tcp_async_write(struct tcp_connection* con,int fd)
 static int tsend_stream_async(struct tcp_connection *c,
 		int fd, char* buf, unsigned int len, int timeout)
 {
-	int written;
 	int n;
 	struct pollfd pf;
 
 	pf.fd=fd;
 	pf.events=POLLOUT;
-	written=0;
 
 again:
 	n=send(fd, buf, len,0);
@@ -410,7 +429,6 @@ again:
 			goto poll_loop;
 	}
 
-	written+=n;
 	if (n < len) {
 		/* partial write */
 		buf += n;

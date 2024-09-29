@@ -44,6 +44,7 @@
 #include "../ut.h"
 #include "../error.h"
 #include "../dprint.h"
+#include "../data_lump.h"
 #include "../data_lump_rpl.h"
 #include "../mem/mem.h"
 #include "../error.h"
@@ -229,6 +230,14 @@ char* get_hdr_field(char* buf, char* end, struct hdr_field* hdr)
 		case HDR_PROXY_AUTHENTICATE_T:
 		case HDR_FEATURE_CAPS_T:
 		case HDR_REPLACES_T:
+		case HDR_TO_PATH_T:
+		case HDR_FROM_PATH_T:
+		case HDR_MESSAGE_ID_T:
+		case HDR_BYTE_RANGE_T:
+		case HDR_FAILURE_REPORT_T:
+		case HDR_SUCCESS_REPORT_T:
+		case HDR_STATUS_T:
+		case HDR_USE_PATH_T:
 		case HDR_OTHER_T:
 			/* just skip over it */
 			hdr->body.s=tmp;
@@ -239,7 +248,8 @@ char* get_hdr_field(char* buf, char* end, struct hdr_field* hdr)
 				if (match){
 					match++;
 				}else {
-					LM_ERR("bad body for <%s>(%d)\n", hdr->name.s, hdr->type);
+					LM_ERR("bad body for <%.*s>(%d)\n",
+					         hdr->name.len, hdr->name.s, hdr->type);
 					tmp=end;
 					goto error_bad_hdr;
 				}
@@ -331,6 +341,14 @@ int parse_headers(struct sip_msg* msg, hdr_flags_t flags, int next)
 				pkg_free(hf);
 				goto skip;
 			case HDR_OTHER_T: /*do nothing*/
+			case HDR_TO_PATH_T:
+			case HDR_FROM_PATH_T:
+			case HDR_MESSAGE_ID_T:
+			case HDR_BYTE_RANGE_T:
+			case HDR_FAILURE_REPORT_T:
+			case HDR_SUCCESS_REPORT_T:
+			case HDR_STATUS_T:
+			case HDR_USE_PATH_T:
 				break;
 			case HDR_CALLID_T:
 				if (msg->callid==0) msg->callid=hf;
@@ -674,6 +692,16 @@ int clone_headers(struct sip_msg *from_msg, struct sip_msg *to_msg)
 			link_sibling_hdr_case(pai, HDR_PAI_T);
 			link_sibling_hdr_case(h_via1, HDR_VIA_T);
 
+			/* not used in sip_msg */
+			case HDR_TO_PATH_T:
+			case HDR_FROM_PATH_T:
+			case HDR_MESSAGE_ID_T:
+			case HDR_BYTE_RANGE_T:
+			case HDR_FAILURE_REPORT_T:
+			case HDR_SUCCESS_REPORT_T:
+			case HDR_STATUS_T:
+			case HDR_USE_PATH_T:
+
 			case HDR_OTHER_T:
 			case HDR_ERROR_T:
 				break;
@@ -701,8 +729,8 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 	hdr_flags_t flags;
 
 	/* eat crlf from the beginning */
-	for (tmp=buf; (*tmp=='\n' || *tmp=='\r')&&
-			(unsigned int)(tmp-buf) < len ; tmp++);
+	for (tmp=buf; (unsigned int)(tmp-buf) < len
+	        && (*tmp=='\n' || *tmp=='\r'); tmp++);
 	offset=tmp-buf;
 	fl=&(msg->first_line);
 	rest=parse_first_line(tmp, len-offset, fl);
@@ -1397,3 +1425,15 @@ done:
 }
 
 
+int delete_headers(struct sip_msg *msg, struct hdr_field *hdr)
+{
+	for (; hdr; hdr = hdr->sibling) {
+		if (!del_lump(msg, hdr->name.s - msg->buf, hdr->len, hdr->type)) {
+			LM_ERR("failed to delete contact '%.*s'\n", hdr->name.len,
+			       hdr->name.s);
+			return -1;
+		}
+	}
+
+	return 0;
+}

@@ -25,6 +25,8 @@
 #include <string.h>
 
 #include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/opensslv.h>
 
 #include "../../str.h"
 #include "../../parser/digest/digest_parser.h"
@@ -35,22 +37,76 @@
 #include "dauth_calc.h"
 #include "dauth_hexops.h"
 
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
+#define OS_SHA256_Declare(ctxpp) SHA256_CTX ctxpp
+#define OS_SHA256_Init(ctxpp) SHA256_Init(ctxpp)
+#define OS_SHA256_Update(ctxpp, m, mlen) SHA256_Update((ctxpp), m, mlen)
+#define OS_SHA256_Final(ctxpp, _h) SHA256_Final((unsigned char *)_h, (ctxpp));
+
+#define OS_SHA256(ctxpp, m, mlen, h) \
+	do { \
+		OS_SHA256_Init(ctxpp); \
+		OS_SHA256_Update(ctxpp, m, mlen); \
+		OS_SHA256_Final(ctxpp, h); \
+	} while(0)
+
+#else /* OPENSSL_VERSION_NUMBER */
+
+#define OS_SHA256_Declare(ctxpp) EVP_MD_CTX *ctxpp
+
+#define OS_SHA256_Init(ctxpp) \
+	do { \
+		*(ctxpp) = EVP_MD_CTX_new(); \
+		if (*(ctxpp) == NULL) \
+			return -1; \
+		if (EVP_DigestInit(*(ctxpp), EVP_sha256()) != 1) { \
+			EVP_MD_CTX_free(*(ctxpp)); \
+			return -1; \
+		} \
+	} while(0)
+
+#define OS_SHA256_Final(ctxpp, _h) \
+	do { \
+		unsigned int olen = 0; \
+		if (EVP_DigestFinal_ex(*(ctxpp), (unsigned char *)(_h), &olen) != 1) { \
+			EVP_MD_CTX_free(*(ctxpp)); \
+			return -1; \
+		} \
+		EVP_MD_CTX_free(*(ctxpp)); \
+		DASSERT(olen == HASHLEN_SHA256); \
+		*(ctxpp) = NULL; \
+	} while(0)
+
+#define OS_SHA256_Update(ctxpp, m, mlen) \
+	do { \
+		if (EVP_DigestUpdate(*(ctxpp), m, mlen) != 1) { \
+			EVP_MD_CTX_free(*(ctxpp)); \
+			return -1; \
+		} \
+	} while (0);
+
+#define OS_SHA256(ctxpp, m, mlen, h) \
+		SHA256((unsigned char *)(m), (mlen), (unsigned char *)(h));
+
+#endif /* OPENSSL_VERSION_NUMBER */
+
 /*
  * calculate H(A1)
  */
 static int digest_calc_HA1(const struct digest_auth_credential *crd,
     HASHHEX *sess_key)
 {
-	SHA256_CTX Sha256Ctx;
 	HASH_SHA256 HA1;
+	OS_SHA256_Declare(Sha256Ctx);
 
-	SHA256_Init(&Sha256Ctx);
-	SHA256_Update(&Sha256Ctx, crd->user.s, crd->user.len);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, crd->realm.s, crd->realm.len);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, crd->passwd.s, crd->passwd.len);
-	SHA256_Final((unsigned char *)HA1, &Sha256Ctx);
+	OS_SHA256_Init(&Sha256Ctx);
+	OS_SHA256_Update(&Sha256Ctx, crd->user.s, crd->user.len);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Update(&Sha256Ctx, crd->realm.s, crd->realm.len);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Update(&Sha256Ctx, crd->passwd.s, crd->passwd.len);
+	OS_SHA256_Final(&Sha256Ctx, HA1);
+
 	cvt_hex128(HA1, sess_key->SHA256, HASHLEN_SHA256, HASHHEXLEN_SHA256);
 
 	return 0;
@@ -60,19 +116,20 @@ static int digest_calc_HA1(const struct digest_auth_credential *crd,
 static int digest_calc_HA1sess(const str_const *nonce, const str_const *cnonce,
     HASHHEX *sess_key)
 {
-	SHA256_CTX Sha256Ctx;
 	HASH_SHA256 HA1;
+	OS_SHA256_Declare(Sha256Ctx);
 
-	SHA256_Init(&Sha256Ctx);
-	SHA256_Update(&Sha256Ctx, sess_key->SHA256, HASHHEXLEN_SHA256);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, nonce->s, nonce->len);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, cnonce->s, cnonce->len);
-	SHA256_Final((unsigned char *)HA1, &Sha256Ctx);
+	OS_SHA256_Init(&Sha256Ctx);
+	OS_SHA256_Update(&Sha256Ctx, sess_key->SHA256, HASHHEXLEN_SHA256);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Update(&Sha256Ctx, nonce->s, nonce->len);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Update(&Sha256Ctx, cnonce->s, cnonce->len);
+	OS_SHA256_Final(&Sha256Ctx, HA1);
+
 	cvt_hex128(HA1, sess_key->SHA256, HASHLEN_SHA256, HASHHEXLEN_SHA256);
 
-        return 0;
+	return 0;
 }
 
 /*
@@ -81,30 +138,29 @@ static int digest_calc_HA1sess(const str_const *nonce, const str_const *cnonce,
 static int digest_calc_HA2(const str_const *msg_body, const str_const *method,
     const str_const *uri, int auth_int, HASHHEX *HA2Hex)
 {
-	SHA256_CTX Sha256Ctx;
 	HASH_SHA256 HA2;
 	HASH_SHA256 HENTITY;
 	HASHHEX_SHA256 HENTITYHex;
+	OS_SHA256_Declare(Sha256Ctx);
 
 	if (auth_int) {
-		SHA256_Init(&Sha256Ctx);
-		SHA256_Update(&Sha256Ctx, msg_body->s, msg_body->len);
-		SHA256_Final((unsigned char *)HENTITY, &Sha256Ctx);
+		OS_SHA256(&Sha256Ctx, msg_body->s, msg_body->len, HENTITY);
 		cvt_hex128(HENTITY, HENTITYHex, HASHLEN_SHA256, HASHHEXLEN_SHA256);
 	}
 
-	SHA256_Init(&Sha256Ctx);
-	SHA256_Update(&Sha256Ctx, method->s, method->len);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, uri->s, uri->len);
+	OS_SHA256_Init(&Sha256Ctx);
+	if (method->s) {
+		OS_SHA256_Update(&Sha256Ctx, method->s, method->len);
+		OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	}
+	OS_SHA256_Update(&Sha256Ctx, uri->s, uri->len);
 
-	if (auth_int)
-	{
-		SHA256_Update(&Sha256Ctx, ":", 1);
-		SHA256_Update(&Sha256Ctx, HENTITYHex, HASHHEXLEN_SHA256);
+	if (auth_int) {
+		OS_SHA256_Update(&Sha256Ctx, ":", 1);
+		OS_SHA256_Update(&Sha256Ctx, HENTITYHex, HASHHEXLEN_SHA256);
 	};
 
-	SHA256_Final((unsigned char *)HA2, &Sha256Ctx);
+	OS_SHA256_Final(&Sha256Ctx, HA2);
 	cvt_hex128(HA2, HA2Hex->SHA256, HASHLEN_SHA256, HASHHEXLEN_SHA256);
 	return 0;
 }
@@ -116,25 +172,26 @@ static int _digest_calc_response(const HASHHEX *ha1, const HASHHEX *ha2,
     const str_const *nonce, const str_const *qop_val, const str_const *nc,
     const str_const *cnonce, struct digest_auth_response *response)
 {
-	SHA256_CTX Sha256Ctx;
+	OS_SHA256_Declare(Sha256Ctx);
 
-	SHA256_Init(&Sha256Ctx);
-	SHA256_Update(&Sha256Ctx, ha1->SHA256, HASHHEXLEN_SHA256);
-	SHA256_Update(&Sha256Ctx, ":", 1);
-	SHA256_Update(&Sha256Ctx, nonce->s, nonce->len);
-	SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Init(&Sha256Ctx);
+
+	OS_SHA256_Update(&Sha256Ctx, ha1->SHA256, HASHHEXLEN_SHA256);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
+	OS_SHA256_Update(&Sha256Ctx, nonce->s, nonce->len);
+	OS_SHA256_Update(&Sha256Ctx, ":", 1);
 
 	if (qop_val && qop_val->s && qop_val->len != 0)
 	{
-		SHA256_Update(&Sha256Ctx, nc->s, nc->len);
-		SHA256_Update(&Sha256Ctx, ":", 1);
-		SHA256_Update(&Sha256Ctx, cnonce->s, cnonce->len);
-		SHA256_Update(&Sha256Ctx, ":", 1);
-		SHA256_Update(&Sha256Ctx, qop_val->s, qop_val->len);
-		SHA256_Update(&Sha256Ctx, ":", 1);
+		OS_SHA256_Update(&Sha256Ctx, nc->s, nc->len);
+		OS_SHA256_Update(&Sha256Ctx, ":", 1);
+		OS_SHA256_Update(&Sha256Ctx, cnonce->s, cnonce->len);
+		OS_SHA256_Update(&Sha256Ctx, ":", 1);
+		OS_SHA256_Update(&Sha256Ctx, qop_val->s, qop_val->len);
+		OS_SHA256_Update(&Sha256Ctx, ":", 1);
 	};
-	SHA256_Update(&Sha256Ctx, ha2->SHA256, HASHHEXLEN_SHA256);
-	SHA256_Final((unsigned char *)response->RespHash.SHA256, &Sha256Ctx);
+	OS_SHA256_Update(&Sha256Ctx, ha2->SHA256, HASHHEXLEN_SHA256);
+	OS_SHA256_Final(&Sha256Ctx, response->RespHash.SHA256);
 	return 0;
 }
 

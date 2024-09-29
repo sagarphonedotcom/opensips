@@ -66,7 +66,7 @@ int post_buf_size = DEFAULT_POST_BUF_SIZE;
 struct httpd_cb *httpd_cb_list = NULL;
 
 
-static proc_export_t mi_procs[] = {
+static const proc_export_t mi_procs[] = {
 	{"HTTPD",  0,  0, httpd_proc, 1,
 		PROC_FLAG_INITCHILD|PROC_FLAG_HAS_IPC|PROC_FLAG_NEEDS_SCRIPT },
 	{NULL, 0, 0, NULL, 0, 0}
@@ -74,7 +74,7 @@ static proc_export_t mi_procs[] = {
 
 
 /** Module parameters */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"port",          INT_PARAM, &port},
 	{"ip",            STR_PARAM, &ip.s},
 	{"buf_size",      INT_PARAM, &buffer.len},
@@ -86,13 +86,13 @@ static param_export_t params[] = {
 };
 
 /** Exported functions */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"httpd_bind",	(cmd_function)httpd_bind, {{0,0,0}}, 0},
 	{0,0,{{0,0,0}},0}
 };
 
 /** MI commands */
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "httpd_list_root_path", 0, 0, 0, {
 		{mi_list_root_path, {0}},
 		{EMPTY_MI_RECIPE}}
@@ -128,8 +128,8 @@ struct module_exports exports = {
 #if defined MHD_VERSION && MHD_VERSION < 0x00093500
 static long httpd_get_runtime_version(void)
 {
-	char *end, *rend, *vi;
-	const char *ver = MHD_get_version();
+	char *end;
+	const char *ver = MHD_get_version(), *rend, *vi;
 	unsigned long tmp, version = 0;
 	int i;
 
@@ -168,7 +168,7 @@ static int mod_init(void)
 	}
 	if (ip.s) {
 		ip.len = strlen(ip.s);
-		if ( (_ip=str2ip(&ip)) == NULL ) {
+		if ( strcmp(ip.s, "*") && !(_ip=str2ip(&ip)) && !(_ip=str2ip6(&ip))) {
 			LM_ERR("invalid IP [%.*s]\n", ip.len, ip.s);
 			return -1;
 		}

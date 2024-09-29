@@ -31,6 +31,7 @@
 #include "../../mem/mem.h"
 #include "../../db/db.h"
 #include "../../mod_fix.h"
+#include "../../ipc.h"
 #include "../../lib/list.h"
 #include "../../resolve.h"
 #include "cgrates.h"
@@ -81,7 +82,7 @@ static int pv_get_cgr_reply(struct sip_msg *msg, pv_param_t *param,
 
 OSIPS_LIST_HEAD(cgrates_engines);
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"cgrates_acc", (cmd_function)w_cgr_acc, {
 		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_flags, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_dlg_loaded, 0},
@@ -100,7 +101,7 @@ static cmd_export_t cmds[] = {
 	{0,0,{{0,0,0}},0}
 };
 
-static pv_export_t pvars[] = {
+static const pv_export_t pvars[] = {
 	{ str_init("cgr"), 2003, w_pv_get_cgr, w_pv_set_cgr,
 		pv_parse_cgr, pv_parse_idx_cgr, 0, 0},
 	{ str_init("cgr_opt"), 2004, w_pv_get_cgr_opt, w_pv_set_cgr_opt,
@@ -110,7 +111,7 @@ static pv_export_t pvars[] = {
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 	{"cgrates_auth", (acmd_function)w_acgr_auth, {
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
@@ -121,7 +122,7 @@ static acmd_export_t acmds[] = {
 	{0,0,{{0,0,0}}}
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"cgrates_engine", STR_PARAM|USE_FUNC_PARAM,
 		(void*)cgrates_set_engine },
 	{"bind_ip", STR_PARAM, &cgre_bind_ip.s },
@@ -131,7 +132,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "dialog", DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -274,10 +275,11 @@ static int child_init(int rank)
 	/* go through each server and initialize a default connection */
 	list_for_each(l, &cgrates_engines) {
 		e = list_entry(l, struct cgr_engine, list);
-		if ((c = cgrc_new(e)) && cgrc_conn(c) >= 0) {
+		if ((c = cgrc_new(e)) != NULL) {
 			e->default_con = c;
 			CGRC_SET_DEFAULT(c);
-			cgrc_start_listen(c);
+			if (ipc_send_rpc(process_no, cgrc_conn_rpc, c) < 0)
+				LM_ERR("could not send connect job!\n");
 		}
 	}
 	return cgr_init_common();
@@ -322,14 +324,10 @@ static int cgrates_set_engine(modparam_t type, void * val)
 		port = CGR_DEFAULT_PORT;
 	}
 	str_trim_spaces_lr(host);
-	if ((ip = str2ip(&host)) == NULL) {
-		LM_ERR("invalid ip in cgr engine host: %.*s\n", host.len, host.s);
-		return -1;
-	}
 
 	LM_DBG("Adding cgrates engine %.*s:%u\n", host.len, host.s, port);
 
-	e = pkg_malloc(sizeof(*e) + host.len);
+	e = pkg_malloc(sizeof(*e) + host.len + 1);
 	if (!e) {
 		LM_ERR("out of pkg mem!\n");
 		return -1;
@@ -338,9 +336,14 @@ static int cgrates_set_engine(modparam_t type, void * val)
 	e->host.s = (char *)(e + 1);
 	e->host.len = host.len;
 	memcpy(e->host.s, host.s, host.len);
+	e->host.s[e->host.len] = '\0';
 
 	e->port = port;
-	init_su(&e->su, ip, port);
+
+	if ((ip = str2ip(&host)) || (ip = str2ip6(&host)))
+		init_su(&e->su, ip, port);
+	else
+		e->is_fqdn = 1;
 
 	INIT_LIST_HEAD(&e->conns);
 
@@ -492,7 +495,7 @@ static int pv_get_cgr(struct sip_msg *msg, pv_param_t *param,
 		return -1;
 	}
 
-	if (!(ctx = CGR_GET_CTX()))
+	if (!(ctx = cgr_try_get_ctx()))
 		return pv_get_null(msg, param, val);
 
 	s = cgr_get_sess(ctx, pv_get_idx_value(msg, param));
@@ -669,7 +672,7 @@ static int pv_parse_idx_cgr(pv_spec_p sp, const str *in)
 					in->len, in->s);
 			return -1;
 		}
-		sp->pvp.pvi.u.dval = sp;
+		sp->pvp.pvi.u.dval = pv;
 		sp->pvp.pvi.type = CGR_PV_NAME_VAR;
 	} else {
 		/* we need to add the null terminator */

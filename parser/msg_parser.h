@@ -124,6 +124,12 @@ enum request_method {
                                       * route */
 #define FL_TM_REPLICATED	 (1<<19) /* message received due to a tm replication */
 #define FL_BODY_NO_SDP       (1<<20) /* message does not have an SDP body */
+#define FL_IS_LOCAL          (1<<21) /* the message is a locally generated
+                                      * one, not received */
+#define FL_HAS_ROUTE_LUMP    (1<<22) /* the message had Route headers added
+                                      * as lumps */
+#define FL_USE_SIPTRACE_B2B  (1<<23) /* used by tracer to check if the b2b
+                                      * tracing was enabled */
 
 /* define the # of unknown URI parameters to parse */
 #define URI_MAX_U_PARAMS 10
@@ -202,6 +208,9 @@ struct sip_uri {
 	str pn_prid_val;
 	str pn_param_val;
 	str pn_purr_val;
+	/* XXX - in the future when adding params as special links
+	 * in the list above, make sure to also update compare_uris() function
+	 * to explicitly compare these here */
 
 	/* unknown params */
 	str u_name[URI_MAX_U_PARAMS]; /* Unknown param names */
@@ -357,6 +366,9 @@ int parse_headers(struct sip_msg* msg, hdr_flags_t flags, int next);
 
 char* get_hdr_field(char* buf, char* end, struct hdr_field* hdr);
 
+/* add DEL lumps for all headers matching the given @hdr */
+int delete_headers(struct sip_msg *msg, struct hdr_field *hdr);
+
 void free_sip_msg(struct sip_msg* msg);
 
 int clone_headers(struct sip_msg *from_msg, struct sip_msg *to_msg);
@@ -432,12 +444,14 @@ inline static int get_body(struct sip_msg *msg, str *body)
 	body->len = msg->buf + msg->len - body->s;
 
 	/* double check the len against content-length hdr
-	   (if present, it must be already parsed) */
+	   (if present, it must be already parsed);
+	   NOTE that the CT hdr may be missing if using UDP, so 
+	   we do not consider its missing an err case */
 	if (msg->content_length) {
 		ct_len = get_content_length( msg );
 		if (ct_len<body->len)
 			body->len = ct_len;
-	} else {
+	} else if (msg->rcv.proto!=PROTO_UDP) {
 		/* no ct -> no body */
 		body->s = NULL;
 		body->len = 0;

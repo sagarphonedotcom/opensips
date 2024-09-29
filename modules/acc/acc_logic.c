@@ -72,33 +72,6 @@ static query_list_t *mc_ins_list = NULL;
 
 int is_cdr_enabled=0;
 
-#define is_acc_flag_set(_mask, _type, _flag) ( _mask & ((_type * _flag)))
-
-#define is_log_flag_on(_mask, _flag) is_acc_flag_set(_mask, DO_ACC_LOG, _flag)
-#define is_log_acc_on(_mask)         is_log_flag_on(_mask, DO_ACC)
-#define is_log_cdr_on(_mask)         is_log_flag_on(_mask, DO_ACC_CDR)
-#define is_log_mc_on(_mask)          is_log_flag_on(_mask, DO_ACC_MISSED)
-#define is_log_failed_on(_mask)      is_log_flag_on(_mask, DO_ACC_FAILED)
-
-#define is_aaa_flag_on(_mask, _flag) is_acc_flag_set(_mask, DO_ACC_AAA, _flag)
-#define is_aaa_acc_on(_mask)         is_aaa_flag_on(_mask, DO_ACC)
-#define is_aaa_cdr_on(_mask)         is_aaa_flag_on(_mask, DO_ACC_CDR)
-#define is_aaa_mc_on(_mask)          is_aaa_flag_on(_mask, DO_ACC_MISSED)
-#define is_aaa_failed_on(_mask)      is_aaa_flag_on(_mask, DO_ACC_FAILED)
-
-#define is_db_flag_on(_mask, _flag)  is_acc_flag_set(_mask, DO_ACC_DB, _flag)
-#define is_db_acc_on(_mask)          is_db_flag_on(_mask, DO_ACC)
-#define is_db_cdr_on(_mask)          is_db_flag_on(_mask, DO_ACC_CDR)
-#define is_db_mc_on(_mask)           is_db_flag_on(_mask, DO_ACC_MISSED)
-#define is_db_failed_on(_mask)       is_db_flag_on(_mask, DO_ACC_FAILED)
-
-#define is_evi_flag_on(_mask, _flag) is_acc_flag_set(_mask, DO_ACC_EVI, _flag)
-#define is_evi_acc_on(_mask)         is_evi_flag_on(_mask, DO_ACC)
-#define is_evi_cdr_on(_mask)         is_evi_flag_on(_mask, DO_ACC_CDR)
-#define is_evi_mc_on(_mask)          is_evi_flag_on(_mask, DO_ACC_MISSED)
-#define is_evi_failed_on(_mask)      is_evi_flag_on(_mask, DO_ACC_FAILED)
-
-
 #define is_acc_on(_mask) \
 	( (is_log_acc_on(_mask)) || (is_db_acc_on(_mask)) \
 	|| (is_aaa_acc_on(_mask)) || (is_evi_acc_on(_mask)) )
@@ -596,9 +569,10 @@ static void acc_merge_contexts(struct dlg_cell *dlg, int type,
 void acc_update_ctx_callback(struct dlg_cell *dlg, int type,
 			struct dlg_cb_params *_params)
 {
-	str flags_s;
+	int_str flags_s;
 	acc_ctx_t* ctx = (acc_ctx_t *)(*_params->param);
 	unsigned long long flags;
+	int val_type;
 
 	if (!dlg) {
 		LM_ERR("null dialog - cannot fetch message flags\n");
@@ -611,9 +585,9 @@ void acc_update_ctx_callback(struct dlg_cell *dlg, int type,
 		return;
 	}
 
-	flags_s.s = (char *)&flags;
-	flags_s.len = sizeof(flags);
-	if (dlg_api.fetch_dlg_value(dlg, &flags_str, &flags_s, 1) < 0) {
+	flags_s.s.s = (char *)&flags;
+	flags_s.s.len = sizeof(flags);
+	if (dlg_api.fetch_dlg_value(dlg, &flags_str, &val_type, &flags_s, 1) < 0) {
 		LM_DBG("flags were not saved in dialog\n");
 		return;
 	}
@@ -627,26 +601,27 @@ void acc_update_ctx_callback(struct dlg_cell *dlg, int type,
 
 void acc_loaded_callback(struct dlg_cell *dlg, int type,
 			struct dlg_cb_params *_params) {
-		str flags_s, table_s, created_s;
+		int_str flags_s, table_s, created_s;
 		acc_ctx_t* ctx;
 		time_t created;
 		unsigned long long flags;
+		int val_type;
 
 		if (!dlg) {
 			LM_ERR("null dialog - cannot fetch message flags\n");
 			return;
 		}
 
-		flags_s.s = (char *)&flags;
-		flags_s.len = sizeof(flags);
-		if (dlg_api.fetch_dlg_value(dlg, &flags_str, &flags_s, 1) < 0) {
+		flags_s.s.s = (char *)&flags;
+		flags_s.s.len = sizeof(flags);
+		if (dlg_api.fetch_dlg_value(dlg, &flags_str, &val_type, &flags_s, 1) < 0) {
 			LM_DBG("flags were not saved in dialog\n");
 			return;
 		}
 
-		created_s.s = (char *)&created;
-		created_s.len = sizeof(created);
-		if (dlg_api.fetch_dlg_value(dlg, &created_str, &created_s, 1) < 0) {
+		created_s.s.s = (char *)&created;
+		created_s.s.len = sizeof(created);
+		if (dlg_api.fetch_dlg_value(dlg, &created_str, &val_type, &created_s, 1) < 0) {
 			LM_DBG("created time was not saved in dialog\n");
 			return;
 		}
@@ -667,18 +642,18 @@ void acc_loaded_callback(struct dlg_cell *dlg, int type,
 
 		/* restore accounting table if db accounting is used */
 		if (is_db_acc_on(ctx->flags)) {
-			if (dlg_api.fetch_dlg_value(dlg, &table_str, &table_s, 0) < 0) {
+			if (dlg_api.fetch_dlg_value(dlg, &table_str, &val_type, &table_s, 0) < 0) {
 				LM_DBG("table was not saved in dialog\n");
 				return;
 			}
 
-			if ((ctx->acc_table.s=shm_malloc(table_s.len)) == NULL) {
+			if ((ctx->acc_table.s=shm_malloc(table_s.s.len)) == NULL) {
 				LM_ERR("no more shm!\n");
 				return;
 			}
 
-			memcpy(ctx->acc_table.s, table_s.s, table_s.len);
-			ctx->acc_table.len = table_s.len;
+			memcpy(ctx->acc_table.s, table_s.s.s, table_s.s.len);
+			ctx->acc_table.len = table_s.s.len;
 		}
 
 
@@ -903,10 +878,10 @@ static void acc_dlg_ended(struct dlg_cell *dlg, int type,
 static void acc_dlg_onwrite(struct dlg_cell *dlg, int type,
 		struct dlg_cb_params *_params)
 {
-	str flags_s;
+	int_str flags_s;
 	acc_ctx_t* ctx;
-
-	str created_s;
+	int_str isval;
+	int_str created_s;
 
 	if (!_params) {
 		LM_ERR("not enough info!\n");
@@ -927,25 +902,26 @@ static void acc_dlg_onwrite(struct dlg_cell *dlg, int type,
 		return;
 	}
 
-	flags_s.s = (char*)(&ctx->flags);
-	flags_s.len = sizeof(unsigned long long);
+	flags_s.s.s = (char*)(&ctx->flags);
+	flags_s.s.len = sizeof(unsigned long long);
 
 	/* store flags into dlg */
-	if ( dlg_api.store_dlg_value(dlg, &flags_str, &flags_s) < 0) {
+	if ( dlg_api.store_dlg_value(dlg, &flags_str, &flags_s, DLG_VAL_TYPE_STR) < 0) {
 		LM_ERR("cannot store flag value into dialog\n");
 		return;
 	}
 
-	created_s.s = (char*)(&ctx->created);
-	created_s.len = sizeof(time_t);
+	created_s.s.s = (char*)(&ctx->created);
+	created_s.s.len = sizeof(time_t);
 
-	if ( dlg_api.store_dlg_value(dlg,&created_str,&created_s) < 0) {
+	if ( dlg_api.store_dlg_value(dlg,&created_str,&created_s,DLG_VAL_TYPE_STR) < 0) {
 		LM_ERR("cannot store created value!\n");
 		return;
 	}
 
 	if (is_db_acc_on(ctx->flags) && ctx->acc_table.s && ctx->acc_table.len) {
-		if ( dlg_api.store_dlg_value(dlg, &table_str, &ctx->acc_table) < 0) {
+		isval.s = ctx->acc_table;
+		if ( dlg_api.store_dlg_value(dlg, &table_str, &isval, DLG_VAL_TYPE_STR) < 0) {
 			LM_ERR("cannot store table name into dialog\n");
 			return;
 		}
@@ -981,7 +957,7 @@ static void acc_cdr_cb( struct cell* t, int type, struct tmcb_params *ps )
 	}
 
 	if (is_aaa_acc_on(ctx->flags) && acc_aaa_cdrs(dlg, ps->req, ctx) < 0) {
-		LM_ERR("Cannot create radius accounting\n");
+		LM_ERR("Cannot perform radius accounting\n");
 		return;
 	}
 
@@ -1061,9 +1037,20 @@ unsigned long long do_acc_type_parser(str* token)
 		return DO_ACC_LOG;
 	} else if (token->len == do_acc_aaa_s.len &&
 			!strncasecmp(token->s, do_acc_aaa_s.s, token->len)) {
+		if (!proto.create_aaa_message) {
+			LM_ERR("do_accounting(\"aaa\") was used"
+			        ", but no 'aaa' module is loaded!\n");
+			return DO_ACC_ERR;
+		}
+
 		return DO_ACC_AAA;
 	} else if (token->len == do_acc_db_s.len &&
 			!strncasecmp(token->s, do_acc_db_s.s, token->len)) {
+		if (!acc_dbf.init) {
+			LM_ERR("do_accounting(\"db\") was used"
+			        ", but no 'db' module is loaded!\n");
+			return DO_ACC_ERR;
+		}
 		return DO_ACC_DB;
 	}  else if (token->len == do_acc_evi_s.len &&
 			!strncasecmp(token->s, do_acc_evi_s.s, token->len)) {
@@ -1254,7 +1241,7 @@ int w_do_acc(struct sip_msg* msg, unsigned long long *type,
 		return 1;
 	}
 
-	flag_mask = *type + *type * (flags ? *flags : 0);
+	flag_mask = acc_bitmask_set(*type, flags);
 	if (is_cdr_acc_on(flag_mask)) {
 		/* setting this flag will allow us to register everything
 		 * that is needed for CDR accounting only once */
@@ -1378,24 +1365,18 @@ int w_do_acc(struct sip_msg* msg, unsigned long long *type,
 	return 1;
 }
 
-int w_drop_acc(struct sip_msg* msg, unsigned long long *type,
+int w_drop_acc(struct sip_msg* msg, unsigned long long *types,
 			unsigned long long *flags)
 {
-	unsigned long long flag_mask;
+	acc_ctx_t *acc_ctx = try_fetch_ctx();
 
-	acc_ctx_t* acc_ctx=try_fetch_ctx();
-
-	if (acc_ctx == NULL) {
+	if (!acc_ctx) {
 		LM_ERR("do_accounting() not used! This function resets flags in "
 				"do_accounting()!\n");
 		return -1;
 	}
 
-	flag_mask = (type ? *type : DO_ACC_LOG | DO_ACC_AAA | DO_ACC_DB | DO_ACC_EVI) *
-		(flags ? *flags : ALL_ACC_FLAGS);
-
-	reset_flags(acc_ctx->flags, flag_mask);
-
+	acc_ctx->flags = acc_bitmask_reset(types, flags, acc_ctx->flags);
 	return 1;
 }
 

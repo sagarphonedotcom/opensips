@@ -131,7 +131,7 @@ int pn_init(void)
 		       param->s.len, param->s.s);
 
 		/* build the filter templates, values are to be filled in at runtime */
-		filter = shm_malloc(sizeof *filter);
+		filter = pkg_malloc(sizeof *filter);
 		if (!filter) {
 			LM_ERR("oom\n");
 			return -1;
@@ -161,7 +161,7 @@ int pn_init(void)
 			return -1;
 		}
 
-		provider = shm_malloc(sizeof *provider + pnp->s.len + 1 +
+		provider = pkg_malloc(sizeof *provider + pnp->s.len + 1 +
 		                      MAX_FEATURE_CAPS_SIZE);
 		if (!provider) {
 			LM_ERR("oom\n");
@@ -224,7 +224,7 @@ int pn_cfg_validate(void)
 }
 
 
-struct module_dependency *pn_get_deps(param_export_t *param)
+struct module_dependency *pn_get_deps(const param_export_t *param)
 {
 	int pn_is_on = *(int *)param->param_pointer;
 
@@ -804,7 +804,7 @@ int pn_async_process_purr(struct sip_msg *req, async_ctx *ctx, udomain_t *d)
 	if (!req->route && (parse_headers(req, HDR_ROUTE_F, 0) != 0 ||
 	                    !req->route)) {
 		LM_DBG("request has no 'pn-purr' (no Route headers found)\n");
-		return -1;
+		return 2;
 	}
 
 	if (!req->route->parsed && parse_rr(req->route) != 0) {

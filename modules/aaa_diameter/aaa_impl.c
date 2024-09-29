@@ -73,6 +73,19 @@ static struct dm_cond *my_reply_cond;
 }
 
 
+// index this using fD's (enum dict_avp_basetype)
+static int dm_avp_inttype[] = {
+	AAA_TYPE_INT32,
+	AAA_TYPE_INT32,
+	AAA_TYPE_INT32,
+	AAA_TYPE_INT64,
+	AAA_TYPE_UINT32,
+	AAA_TYPE_UINT64,
+	AAA_TYPE_FLOAT32,
+	AAA_TYPE_FLOAT64,
+};
+
+
 int dm_init_reply_cond(int proc_rank)
 {
 	my_reply_cond = shm_malloc(sizeof *my_reply_cond);
@@ -202,9 +215,245 @@ out:
 }
 
 
+static int dm_avps2json(void *root, cJSON *avps)
+{
+	cJSON *item = NULL;
+	struct avp *it = NULL;
+	struct avp_hdr *h = NULL;
+	int i = 0;
+
+	FD_CHECK_GT(fd_msg_browse(root, MSG_BRW_FIRST_CHILD, &it, NULL));
+
+	LM_DBG("------------ AVP iteration ----------------\n");
+
+	while (it) {
+		cJSON *val;
+		struct dict_object *obj;
+		struct dict_avp_data dm_avp;
+		int int_type = 1;
+		double num_val = 0;
+
+		FD_CHECK_GT(fd_msg_avp_hdr(it, &h));
+
+		if (h->avp_flags & AVP_FLAG_VENDOR) {
+			struct dict_avp_request ar;
+			memset(&ar, 0, sizeof ar);
+			ar.avp_code = h->avp_code;
+			ar.avp_vendor = h->avp_vendor;
+			FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE_AND_VENDOR,
+					&ar, &obj, ENOENT));
+		} else {
+			FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE,
+					&h->avp_code, &obj, ENOENT));
+		}
+		FD_CHECK_GT(fd_dict_getval(obj, &dm_avp));
+
+		item = cJSON_CreateObject();
+		if (!item) {
+			LM_ERR("oom 2\n");
+			goto out;
+		}
+
+		switch (dm_avp.avp_basetype) {
+		case AVP_TYPE_GROUPED:
+			LM_DBG("%d. got grouped AVP %s, code: %u\n", i, dm_avp.avp_name, dm_avp.avp_code);
+			int_type = 0;
+
+			val = cJSON_CreateArray();
+			if (!val) {
+				LM_ERR("oom 3\n");
+				goto out;
+			}
+
+			if (dm_avps2json(it, val) != 0) {
+				cJSON_Delete(val);
+				LM_ERR("failed to encode Grouped AVP as JSON string (AVP: %s, code: %u)\n",
+				       dm_avp.avp_name, dm_avp.avp_code);
+				goto out;
+			}
+
+			break;
+
+		case AVP_TYPE_OCTETSTRING:
+			LM_DBG("%d. got string AVP %u, len: %d, value: %.*s\n", i, h->avp_code, (int)h->avp_value->os.len, (int)h->avp_value->os.len, h->avp_value->os.data);
+			int_type = 0;
+
+			val = cJSON_CreateStr((const char *)h->avp_value->os.data, (int)h->avp_value->os.len);
+			if (!val) {
+				LM_ERR("oom 4\n");
+				goto out;
+			}
+			break;
+
+		case AVP_TYPE_INTEGER32:
+			LM_DBG("%d. got int32 AVP %u, value: %d\n", i, h->avp_code, h->avp_value->i32);
+			num_val = (double)h->avp_value->i32;
+			break;
+
+		case AVP_TYPE_INTEGER64:
+			LM_DBG("%d. got int64 AVP %u, value: %ld\n", i, h->avp_code, h->avp_value->i64);
+			num_val = (double)h->avp_value->i64;
+			break;
+
+		case AVP_TYPE_UNSIGNED32:
+			LM_DBG("%d. got uint32 AVP %u, value: %u\n", i, h->avp_code, h->avp_value->u32);
+			num_val = (double)h->avp_value->u32;
+			break;
+
+		case AVP_TYPE_UNSIGNED64:
+			LM_DBG("%d. got uint64 AVP %u, value: %lu\n", i, h->avp_code, h->avp_value->u64);
+			num_val = (double)h->avp_value->u64;
+			break;
+
+		case AVP_TYPE_FLOAT32:
+			LM_DBG("%d. got float32 AVP %u, value: %f\n", i, h->avp_code, h->avp_value->f32);
+			num_val = (double)h->avp_value->f32;
+			break;
+
+		case AVP_TYPE_FLOAT64:
+			LM_DBG("%d. got float64 AVP %u, value: %lf\n", i, h->avp_code, h->avp_value->f64);
+			num_val = h->avp_value->f64;
+			break;
+		}
+
+		if (int_type) {
+			/* Integer Type AVP */
+
+			val = cJSON_CreateNumber(num_val);
+			if (!val) {
+				LM_ERR("oom 5\n");
+				goto out;
+			}
+		}
+
+		cJSON_AddItemToObject(item, dm_avp.avp_name, val);
+		cJSON_AddItemToArray(avps, item);
+
+		FD_CHECK_GT(fd_msg_browse(it, MSG_BRW_NEXT, &it, NULL));
+		i++;
+	}
+
+	LM_DBG("------------ END AVP iteration ----------------\n");
+	return 0;
+
+out:
+	cJSON_Delete(item);
+
+	LM_DBG("------------ END AVP iteration ----------------\n");
+	return -1;
+}
+
+
+static int dm_custom_cmd_reply(struct msg **_msg, struct avp * avp, struct session * sess, void * data, enum disp_action * act)
+{
+	cJSON *avps = NULL;
+	struct msg_hdr *hdr = NULL;
+	struct msg *msg = *_msg;
+	struct avp *a = NULL;
+	struct avp_hdr * h = NULL;
+	int rc;
+	str tid;
+	struct dm_cond **prpl_cond, *rpl_cond;
+
+	FD_CHECK(fd_msg_hdr(msg, &hdr));
+
+	if (hdr->msg_flags & CMD_FLAG_REQUEST) {
+		LM_INFO("received a request?! discarding...\n");
+		goto out;
+	}
+
+	cJSON_InitHooks(&shm_mem_hooks);
+	avps = cJSON_CreateArray();
+	if (!avps) {
+		LM_ERR("oom 1\n");
+		goto out;
+	}
+
+	if (dm_avps2json(msg, avps) != 0) {
+		LM_ERR("failed to pack Message AVPs as JSON string\n");
+		goto out;
+	}
+
+	rc = fd_msg_search_avp(msg, dm_dict.Session_Id, &a);
+	if (rc != 0) {
+		LM_DBG("Missing Session-Id AVP in Diameter Answer %d/%d, looking for Transaction-Id\n",
+		       hdr->msg_appl, hdr->msg_code);
+		rc = fd_msg_search_avp(msg, dm_dict.Transaction_Id, &a);
+		if (rc != 0) {
+			LM_WARN("Missing Transaction-Id AVP in Diameter Answer %d/%d\n",
+				   hdr->msg_appl, hdr->msg_code);
+			goto out;
+		}
+
+		FD_CHECK_GT(fd_msg_avp_hdr(a, &h));
+		tid.s = (char *)h->avp_value->os.data;
+		tid.len = (int)h->avp_value->os.len;
+
+		LM_DBG("%d/%d reply %d, Transaction-Id: %.*s\n", hdr->msg_appl,
+			   hdr->msg_code, rc, tid.len, tid.s);
+	} else {
+		FD_CHECK_GT(fd_msg_avp_hdr(a, &h));
+		tid.s = (char *)h->avp_value->os.data;
+		tid.len = (int)h->avp_value->os.len;
+
+		LM_DBG("%d/%d reply %d, Session-Id: %.*s\n", hdr->msg_appl,
+			   hdr->msg_code, rc, tid.len, tid.s);
+	}
+
+	prpl_cond = (struct dm_cond **)hash_find_key(pending_replies, tid);
+	if (!prpl_cond) {
+		LM_ERR("failed to match Transaction_Id %.*s to a pending request\n",
+		       tid.len, tid.s);
+		goto out;
+	}
+	rpl_cond = *prpl_cond;
+
+	pthread_mutex_lock(&rpl_cond->mutex);
+	if (!hash_find_key(pending_replies, tid)) {
+		pthread_mutex_unlock(&rpl_cond->mutex);
+		LM_ERR("Transaction_Id %.*s already processed!\n", tid.len, tid.s);
+		goto out;
+	}
+
+	if (rpl_cond->rpl_avps_json)
+		shm_free(rpl_cond->rpl_avps_json);
+	rpl_cond->rpl_avps_json = cJSON_PrintUnformatted(avps);
+
+	hash_remove_key(pending_replies, tid);
+
+	fd_msg_search_avp(msg, dm_dict.Error_Message, &a);
+	if (a) {
+		rpl_cond->is_error = 1;
+		rc = fd_msg_avp_hdr(a, &h);
+		if (rc != 0) {
+			pthread_mutex_unlock(&rpl_cond->mutex);
+			goto out;
+		}
+
+		LM_DBG("transaction failed (%.*s)\n",
+			(int)h->avp_value->os.len, h->avp_value->os.data);
+	} else {
+		rpl_cond->is_error = 0;
+	}
+
+	/* signal the blocked SIP worker that the auth result is available! */
+	pthread_cond_signal(&rpl_cond->cond);
+	pthread_mutex_unlock(&rpl_cond->mutex);
+
+out:
+	cJSON_Delete(avps);
+	cJSON_InitHooks(NULL);
+
+	FD_CHECK(fd_msg_free(msg));
+	*_msg = NULL;
+	return 0;
+}
+
+
 int dm_register_callbacks(void)
 {
 	struct disp_when data;
+	struct dict_object *vendor_dict;
 
 	/* accounting */
 	{
@@ -236,6 +485,38 @@ int dm_register_callbacks(void)
 
 		/* Advertise support for the Diameter SIP Application app */
 		FD_CHECK(fd_disp_app_support(data.app, NULL, 0, 1 ));
+	}
+
+	/* custom commands */
+	{
+		int i;
+
+		memset(&data, 0, sizeof data);
+
+		for (i = 0; i < n_app_ids; i++) {
+			/* Initialize the dictionary objects we use */
+			FD_CHECK_dict_search(DICT_APPLICATION, APPLICATION_BY_ID,
+				&app_defs[i].id, &data.app);
+
+			/* Register the dispatch callback */
+			FD_CHECK(fd_disp_register(dm_custom_cmd_reply,
+					DISP_HOW_APPID, &data, NULL, NULL));
+
+			if (app_defs[i].vendor != (unsigned int)-1) {
+				FD_CHECK_dict_search(DICT_VENDOR, VENDOR_BY_ID,
+						&app_defs[i].vendor, &vendor_dict);
+			} else {
+				vendor_dict = NULL;
+			}
+
+			/* Advertise support for the respective app */
+			FD_CHECK(fd_disp_app_support(data.app,
+						vendor_dict,
+						(app_defs[i].auth?1:0),
+						(app_defs[i].auth?0:1)));
+
+			LM_DBG("registered a reply callback for App ID %d ...\n", app_defs[i].id);
+		}
 	}
 
 	return 0;
@@ -379,12 +660,12 @@ static int dm_register_digest_avps(void)
 		FD_CHECK_dict_new(DICT_AVP, &data, UTF8String_type, NULL);
 	}
 
-	/* Digest-Qop */
+	/* Digest-QoP */
 	{
 		struct dict_avp_data data = {
 				110,				/* Code */
 				0, 					/* Vendor */
-				"Digest-Qop", 		/* Name */
+				"Digest-QoP", 		/* Name */
 				AVP_FLAG_VENDOR | AVP_FLAG_MANDATORY, 	/* Fixed flags */
 				AVP_FLAG_MANDATORY,		 	/* Fixed flag values */
 				AVP_TYPE_OCTETSTRING 		/* base type of data */
@@ -574,7 +855,7 @@ int dm_init_sip_application(void)
 			that identifies a SIP server.
 		*/
 		struct dict_avp_data data = {
-				369,				/* Code */
+				371,				/* Code */
 				0, 					/* Vendor */
 				"SIP-Server-URI", 	/* Name */
 				AVP_FLAG_VENDOR | AVP_FLAG_MANDATORY, 	/* Fixed flags */
@@ -749,7 +1030,7 @@ int dm_init_sip_application(void)
 					    [ Digest-Algorithm ]
 					    [ Digest-CNonce ]
 					    [ Digest-Opaque ]
-					    [ Digest-Qop ]
+					    [ Digest-QoP ]
 					    [ Digest-Nonce-Count ]
 					    [ Digest-Method]
 					    [ Digest-Entity-Body-Hash ]
@@ -774,7 +1055,7 @@ int dm_init_sip_application(void)
 			{ "Digest-Algorithm",	RULE_OPTIONAL, -1, 1 },
 			{ "Digest-CNonce",		RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Opaque",		RULE_OPTIONAL, -1, 1 },
-			{ "Digest-Qop",			RULE_OPTIONAL, -1, 1 },
+			{ "Digest-QoP",			RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Nonce-Count",	RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Method",		RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Entity-Body-Hash",	RULE_OPTIONAL, -1, 1 },
@@ -1072,12 +1353,12 @@ int freeDiameter_init(void)
 }
 
 
-int dm_find(aaa_conn *con, aaa_map *map, int op)
+int dm_find(aaa_conn *_, aaa_map *map, int op)
 {
 	struct dict_object *obj;
 
-	if (!con || !map) {
-		LM_ERR("invalid arguments (%p %p)\n", con, map);
+	if (!map) {
+		LM_ERR("NULL map argument\n");
 		return -1;
 	}
 
@@ -1135,7 +1416,8 @@ int dm_find(aaa_conn *con, aaa_map *map, int op)
 }
 
 
-aaa_message *dm_create_message(aaa_conn *con, int msg_type)
+aaa_message *_dm_create_message(aaa_conn *_, int msg_type,
+        unsigned int app_id, unsigned int cmd_code)
 {
 	aaa_message *m;
 	struct dm_message *dm;
@@ -1160,12 +1442,20 @@ aaa_message *dm_create_message(aaa_conn *con, int msg_type)
 	memset(dm, 0, sizeof *dm);
 	INIT_LIST_HEAD(&dm->avps);
 	dm->am = m;
+	dm->app_id = app_id;
+	dm->cmd_code = cmd_code;
 
 	return m;
 }
 
 
-int dm_avp_add(aaa_conn *con, aaa_message *msg, aaa_map *avp, void *val,
+aaa_message *dm_create_message(aaa_conn *_, int msg_type)
+{
+	return _dm_create_message(_, msg_type, 0, 0);
+}
+
+
+int _dm_avp_add(aaa_conn *_, struct list_head *avp_arr, aaa_map *avp, void *val,
                int val_length, int vendor)
 {
 	struct {
@@ -1174,7 +1464,7 @@ int dm_avp_add(aaa_conn *con, aaa_message *msg, aaa_map *avp, void *val,
 	} *wrap;
 	int len;
 
-	if (!avp || !avp->name)
+	if (!avp || !avp->name || val_length < AAA_TYPE_GROUPED)
 		return -1;
 	len = strlen(avp->name);
 
@@ -1194,28 +1484,147 @@ int dm_avp_add(aaa_conn *con, aaa_message *msg, aaa_map *avp, void *val,
 	wrap->davp.vendor_id = vendor;
 
 	if (val_length >= 0) {
-		wrap->davp.value.s = wrap->buf + len + 1;
-		wrap->davp.value.len = val_length;
-		memcpy(wrap->davp.value.s, val, val_length);
-		wrap->davp.value.s[val_length] = '\0';
+		wrap->davp.value_type = AAA_TYPE_OCTETSTRING;
+
+		wrap->davp.value.os.data = (uint8_t *)(wrap->buf + len + 1);
+		wrap->davp.value.os.len = val_length;
+		memcpy(wrap->davp.value.os.data, val, val_length);
+		wrap->davp.value.os.data[val_length] = '\0';
+	} else if (val_length == AAA_TYPE_GROUPED) {
+		wrap->davp.value_type = val_length;
+
+		if (dm_build_avps(&wrap->davp.subavps, (cJSON *)val) != 0) {
+			LM_ERR("failed to build sub-AVP list\n");
+			shm_free(wrap);
+			return -1;
+		}
 	} else {
-		/* the (void *) value is actually a 32-bit unsigned integer! */
-		wrap->davp.value.s = (char *)(unsigned long)*(uint32_t *)val;
-		wrap->davp.value.len = val_length;
+		wrap->davp.value_type = val_length;
+
+		switch (val_length) {
+		case AAA_TYPE_INT32:
+			wrap->davp.value.i32 = (int32_t)*(double *)val;
+			break;
+
+		case AAA_TYPE_INT64:
+			wrap->davp.value.i64 = (int64_t)*(double *)val;
+			break;
+
+		case AAA_TYPE_UINT32:
+			wrap->davp.value.u32 = (uint32_t)*(double *)val;
+			break;
+
+		case AAA_TYPE_UINT64:
+			wrap->davp.value.u64 = (uint64_t)*(double *)val;
+			break;
+
+		case AAA_TYPE_FLOAT32:
+			wrap->davp.value.f32 = (float)*(double *)val;
+			break;
+
+		case AAA_TYPE_FLOAT64:
+			wrap->davp.value.f64 = *(double *)val;
+			break;
+		}
 	}
 
-	list_add_tail(&wrap->davp.list,
-			&((struct dm_message *)(msg->avpair))->avps);
-
+	list_add_tail(&wrap->davp.list, avp_arr);
 	return 0;
 }
 
 
-int dm_send_message(aaa_conn *con, aaa_message *req, aaa_message **reply)
+int dm_avp_add(aaa_conn *_, aaa_message *msg, aaa_map *avp, void *val,
+               int val_length, int vendor)
+{
+	return _dm_avp_add(_, &((struct dm_message *)(msg->avpair))->avps,
+	                   avp, val, val_length, vendor);
+}
+
+
+int dm_build_avps(struct list_head *subavps, cJSON *array)
+{
+	cJSON *_avp;
+	struct dict_avp_data dm_avp;
+	struct dict_object *obj;
+	char *name;
+	unsigned int code;
+	str st;
+
+	for (_avp = array; _avp; _avp = _avp->next) {
+		if (_avp->type != cJSON_Object) {
+			LM_ERR("bad JSON type in Grouped AVP: sub-AVPs must be Objects\n");
+			return -1;
+		}
+
+		cJSON *avp = _avp->child;
+
+		// TODO: allow dict too, e.g. maybe for setting a non-zero VendorId?!
+		if (!(avp->type & (cJSON_String|cJSON_Number|cJSON_Array))) {
+			LM_ERR("bad AVP value: only String allowed (AVP name: %s)\n", avp->string);
+			goto error;
+		}
+
+		init_str(&st, avp->string);
+		if (str2int(&st, &code) == 0) {
+
+			LM_DBG("AVP:: searching AVP by int: %d\n", code);
+			FD_CHECK(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE,
+				&code, &obj, ENOENT));
+			FD_CHECK(fd_dict_getval(obj, &dm_avp));
+
+			name = dm_avp.avp_name;
+		} else {
+			LM_DBG("AVP:: searching AVP by string: %s\n", avp->string);
+
+			FD_CHECK(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_NAME_ALL_VENDORS,
+				avp->string, &obj, ENOENT));
+			FD_CHECK(fd_dict_getval(obj, &dm_avp));
+
+			name = avp->string;
+			code = dm_avp.avp_code;
+		}
+
+		aaa_map my_avp = {.name = name};
+
+		if (avp->type & cJSON_String) {
+			LM_DBG("dbg::: AVP %d (name: '%s', str-val: %s)\n", code, name, avp->valuestring);
+			if (_dm_avp_add(NULL, subavps, &my_avp, avp->valuestring,
+			        strlen(avp->valuestring), 0) != 0) {
+				LM_ERR("failed to add AVP %d, aborting request\n", code);
+				goto error;
+			}
+		} else if (avp->type & cJSON_Number) {
+			LM_DBG("dbg::: AVP %d (name: '%s', int-val: %d)\n", code, name, avp->valueint);
+			if (_dm_avp_add(NULL, subavps, &my_avp, &avp->valuedouble,
+							dm_avp_inttype[dm_avp.avp_basetype], 0) != 0) {
+				LM_ERR("failed to add AVP %d, aborting request\n", code);
+				goto error;
+			}
+		} else if (avp->type & cJSON_Array) {
+			LM_DBG("dbg::: AVP %d (name: '%s', grouped)\n", code, name);
+			if (_dm_avp_add(NULL, subavps, &my_avp, avp->child, AAA_TYPE_GROUPED, 0) != 0) {
+				LM_ERR("failed to add grouped AVP %d, aborting request\n", code);
+				goto error;
+			}
+		} else {
+			LM_ERR("bad AVP value type (%d), must be string/int/array\n", avp->type);
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+
+int _dm_send_message(aaa_conn *_, aaa_message *req, aaa_message **reply,
+               char **rpl_avps)
 {
 	struct dm_message *dm;
 
-	if (!con || !req || !my_reply_cond)
+	if (!req || !my_reply_cond)
 		return -1;
 
 	dm = (struct dm_message *)(req->avpair);
@@ -1236,15 +1645,43 @@ int dm_send_message(aaa_conn *con, aaa_message *req, aaa_message **reply)
 
 	LM_DBG("message queued for sending\n");
 
-	if (req->type == AAA_AUTH) {
-		LM_DBG("awaiting auth reply...\n");
+	if (req->type == AAA_AUTH || req->type == AAA_CUSTOM) {
+		struct timespec wait_until;
+		struct timeval now, wait_time, res;
+		int rc;
+
+		gettimeofday(&now, NULL);
+		wait_time.tv_sec = dm_answer_timeout / 1000;
+		wait_time.tv_usec = dm_answer_timeout % 1000 * 1000UL;
+		LM_DBG("awaiting auth reply (%ld s, %ld us)...\n", wait_time.tv_sec, wait_time.tv_usec);
+
+		timeradd(&now, &wait_time, &res);
+
+		wait_until.tv_sec = res.tv_sec;
+		wait_until.tv_nsec = res.tv_usec * 1000UL;
 
 		pthread_mutex_lock(&my_reply_cond->mutex);
-		pthread_cond_wait(&my_reply_cond->cond, &my_reply_cond->mutex);
+		rc = pthread_cond_timedwait(&my_reply_cond->cond,
+					&my_reply_cond->mutex, &wait_until);
+		if (rc != 0) {
+			LM_ERR("timeout (errno: %d '%s') while awaiting Diameter "
+			       "reply\n", rc, strerror(rc));
+			pthread_mutex_unlock(&my_reply_cond->mutex);
+
+			if (rpl_avps)
+				*rpl_avps = NULL;
+			return -2;
+		}
+
 		pthread_mutex_unlock(&my_reply_cond->mutex);
 
 		LM_DBG("reply received, Result-Code: %d (%s)\n", my_reply_cond->rc,
 				my_reply_cond->is_error ? "FAILURE" : "SUCCESS");
+		LM_DBG("AVPs: %s\n", my_reply_cond->rpl_avps_json);
+
+		if (rpl_avps)
+			*rpl_avps = my_reply_cond->rpl_avps_json;
+
 		if (my_reply_cond->is_error)
 			return -1;
 	}
@@ -1253,25 +1690,41 @@ int dm_send_message(aaa_conn *con, aaa_message *req, aaa_message **reply)
 }
 
 
-void _dm_destroy_message(aaa_message *msg)
+int dm_send_message(aaa_conn *_, aaa_message *req, aaa_message **reply)
+{
+	return _dm_send_message(_, req, reply, NULL);
+}
+
+
+/* recursively free all AVPs, including grouped ones */
+static void dm_free_avps(struct list_head *avps)
 {
 	struct list_head *it, *aux;
 	struct dm_avp *avp;
 
+	list_for_each_safe (it, aux, avps) {
+		avp = list_entry(it, struct dm_avp, list);
+
+		if (avp->value_type == AAA_TYPE_GROUPED)
+			dm_free_avps(&avp->subavps);
+
+		shm_free(avp);
+	}
+}
+
+
+void _dm_destroy_message(aaa_message *msg)
+{
 	if (!msg)
 		return;
 
-	list_for_each_safe (it, aux, &((struct dm_message *)(msg->avpair))->avps) {
-		avp = list_entry(it, struct dm_avp, list);
-		/* TODO: clean up any sub-AVPs, if applicable?! */
-		shm_free(avp);
-	}
+	dm_free_avps(&((struct dm_message *)(msg->avpair))->avps);
 
 	shm_free(msg->avpair);
 	shm_free(msg);
 }
 
-int dm_destroy_message(aaa_conn *conn, aaa_message *msg)
+int dm_destroy_message(aaa_conn *_, aaa_message *msg)
 {
 	if (!msg)
 		return 0;

@@ -248,9 +248,9 @@ static inline int nodb_timer(urecord_t* _r)
 
 	while(ptr) {
 		if (!VALID_CONTACT(ptr, act_time)) {
-			/* run callbacks for EXPIRE event */
-			if (exists_ulcb_type(UL_CONTACT_EXPIRE))
-				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr);
+			/* for forcibly expired contacts, DELETE event is already run */
+			if (!FORCE_EXPIRED_CONTACT(ptr) && exists_ulcb_type(UL_CONTACT_EXPIRE))
+				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr, NULL);
 
 			LM_DBG("Binding '%.*s','%.*s' has expired\n",
 				ptr->aor->len, ZSW(ptr->aor->s),
@@ -282,10 +282,9 @@ static inline int ALLOW_UNUSED wt_timer(urecord_t* _r)
 
 	while(ptr) {
 		if (!VALID_CONTACT(ptr, act_time)) {
-			/* run callbacks for EXPIRE event */
-			if (exists_ulcb_type(UL_CONTACT_EXPIRE)) {
-				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr);
-			}
+			/* for forcibly expired contacts, DELETE event is already run */
+			if (!FORCE_EXPIRED_CONTACT(ptr) && exists_ulcb_type(UL_CONTACT_EXPIRE))
+				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr, NULL);
 
 			LM_DBG("Binding '%.*s','%.*s' has expired\n",
 				ptr->aor->len, ZSW(ptr->aor->s),
@@ -325,10 +324,9 @@ static inline int wb_timer(urecord_t* _r,query_list_t **ins_list)
 
 	while(ptr) {
 		if (!VALID_CONTACT(ptr, act_time)) {
-			/* run callbacks for EXPIRE event */
-			if (exists_ulcb_type(UL_CONTACT_EXPIRE)) {
-				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr);
-			}
+			/* for forcibly expired contacts, DELETE event is already run */
+			if (!FORCE_EXPIRED_CONTACT(ptr) && exists_ulcb_type(UL_CONTACT_EXPIRE))
+				run_ul_callbacks( UL_CONTACT_EXPIRE, ptr, NULL);
 
 			LM_DBG("Binding '%.*s','%.*s' has expired\n",
 				ptr->aor->len, ZSW(ptr->aor->s),
@@ -619,7 +617,7 @@ int cdb_flush_urecord(urecord_t *_r)
 		if (!VALID_CONTACT(ct, act_time)) {
 			/* run callbacks for DELETE event */
 			if (exists_ulcb_type(UL_CONTACT_DELETE))
-				run_ul_callbacks(UL_CONTACT_DELETE, ct);
+				run_ul_callbacks(UL_CONTACT_DELETE, ct, NULL);
 
 			LM_DBG("deleting AoR: %.*s, Contact: %.*s.\n",
 				ct->aor->len, ZSW(ct->aor->s),
@@ -827,7 +825,7 @@ void release_urecord(urecord_t* _r, char skip_replication)
 			return;
 
 		if (exists_ulcb_type(UL_AOR_DELETE))
-			run_ul_callbacks(UL_AOR_DELETE, _r);
+			run_ul_callbacks(UL_AOR_DELETE, _r, NULL);
 
 		if (!skip_replication && location_cluster) {
 			if (cluster_mode == CM_FEDERATION_CACHEDB &&
@@ -881,10 +879,10 @@ int insert_ucontact(urecord_t* _r, str* _contact, ucontact_info_t* _ci,
 		replicate_ucontact_insert(_r, _contact, *_c, match);
 
 	if (exists_ulcb_type(UL_CONTACT_INSERT))
-		run_ul_callbacks(UL_CONTACT_INSERT, *_c);
+		run_ul_callbacks(UL_CONTACT_INSERT, *_c, NULL);
 
 	if (!first_contact && exists_ulcb_type(UL_AOR_UPDATE))
-		run_ul_callbacks(UL_AOR_UPDATE, _r);
+		run_ul_callbacks(UL_AOR_UPDATE, _r, NULL);
 
 	if (sql_wmode == SQL_WRITE_THROUGH) {
 		if (persist_urecord_kv_store(_r) != 0)
@@ -911,10 +909,10 @@ int delete_ucontact(urecord_t* _r, struct ucontact* _c,
 		replicate_ucontact_delete(_r, _c, match);
 
 	if (exists_ulcb_type(UL_CONTACT_DELETE))
-		run_ul_callbacks(UL_CONTACT_DELETE, _c);
+		run_ul_callbacks(UL_CONTACT_DELETE, _c, NULL);
 
 	if (exists_ulcb_type(UL_AOR_UPDATE))
-		run_ul_callbacks(UL_AOR_UPDATE, _r);
+		run_ul_callbacks(UL_AOR_UPDATE, _r, NULL);
 
 	LM_DBG("deleting contact '%.*s'\n", _c->c.len, _c->c.s);
 
@@ -940,34 +938,48 @@ int delete_ucontact(urecord_t* _r, struct ucontact* _c,
 
 static inline struct ucontact* contact_match( ucontact_t* ptr, str* _c)
 {
+	struct sip_uri _c_uri;
+
+	if (parse_uri( _c->s, _c->len, &_c_uri) < 0) {
+		LM_ERR("Failed to parse searched URI\n");
+		return NULL;
+	}
+
 	while(ptr) {
-		if ( ptr->expires != UL_EXPIRED_TIME
-		&& (_c->len == ptr->c.len) && !memcmp(_c->s, ptr->c.s, _c->len)
-		) {
+		if ( compare_uris( &ptr->c, NULL, _c, &_c_uri)==0
+		&& ptr->expires != UL_EXPIRED_TIME ) {
 			return ptr;
 		}
 
 		ptr = ptr->next;
 	}
-	return 0;
+	return NULL;
 }
 
 
 static inline struct ucontact* contact_callid_match( ucontact_t* ptr,
 														str* _c, str *_callid)
 {
+	struct sip_uri _c_uri;
+
+	if (parse_uri( _c->s, _c->len, &_c_uri) < 0) {
+		LM_ERR("Failed to parse searched URI\n");
+		return NULL;
+	}
+
 	while(ptr) {
-		if ( ptr->expires != UL_EXPIRED_TIME
-		&& (_c->len==ptr->c.len) && (_callid->len==ptr->callid.len)
-		&& !memcmp(_c->s, ptr->c.s, _c->len)
+
+		if ( (_callid->len==ptr->callid.len)
+		&& compare_uris( &ptr->c, NULL, _c, &_c_uri)==0
 		&& !memcmp(_callid->s, ptr->callid.s, _callid->len)
+		&& ptr->expires != UL_EXPIRED_TIME
 		) {
 			return ptr;
 		}
 
 		ptr = ptr->next;
 	}
-	return 0;
+	return NULL;
 }
 
 

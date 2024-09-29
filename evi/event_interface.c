@@ -124,7 +124,49 @@ int evi_raise_event(event_id_t id, evi_params_t* params)
 
 	return status;
 }
+/* this function checks the subscribers of an event and remove them if 
+they are past their expiry - dont want to print expired events as well */
+void evi_remove_expired_subs(event_id_t id) {
+	evi_subs_p subs, prev;
+	long now;
 
+	lock_get(events[id].lock);
+	now = time(0);
+	subs = events[id].subscribers;
+	prev = NULL;
+	while (subs) {
+		if (!subs->reply_sock) {
+			LM_ERR("unknown destination\n");
+			continue;
+		}
+		/* check expire */
+		if (!(subs->reply_sock->flags & EVI_PENDING) &&
+			subs->reply_sock->flags & EVI_EXPIRE &&
+			subs->reply_sock->subscription_time +
+			subs->reply_sock->expire < now) {
+			LM_DBG("removing expired subscriber %.*s:%.*s:%d for event %.*s\n",
+				subs->trans_mod->proto.len,subs->trans_mod->proto.s,
+				subs->reply_sock->address.len, subs->reply_sock->address.s,
+				subs->reply_sock->port,events[id].name.len,events[id].name.s);
+			if (subs->trans_mod && subs->trans_mod->free)
+				subs->trans_mod->free(subs->reply_sock);
+			else
+				shm_free(subs->reply_sock);
+			if (!prev) {
+				events[id].subscribers = subs->next;
+				shm_free(subs);
+				subs = events[id].subscribers;
+			} else {
+				prev->next = subs->next;
+				shm_free(subs);
+				subs = prev->next;
+			}
+			continue;
+		}
+		subs = subs->next;
+	}
+	lock_release(events[id].lock);
+}
 /* XXX: this function should release its parameters before exiting */
 int evi_raise_event_msg(struct sip_msg *msg, event_id_t id, evi_params_t* params)
 {
@@ -267,7 +309,7 @@ int evi_event_subscribe(str event_name,
 {
 	evi_subs_t *subscriber = NULL;
 	evi_event_p event;
-	evi_export_t *trans_mod = NULL;
+	const evi_export_t *trans_mod = NULL;
 	evi_reply_sock *sock;
 
 	event = evi_get_event(&event_name);
@@ -511,6 +553,8 @@ static int evi_print_subscriber(mi_item_t *subs_obj, evi_subs_p subs)
 {
 	evi_reply_sock *sock;
 	str socket;
+	long now;
+	int expiry_countdown;
 
 	if (!subs || !subs->trans_mod || !subs->trans_mod->print) {
 		LM_ERR("subscriber does not have a print method exported\n");
@@ -533,10 +577,21 @@ static int evi_print_subscriber(mi_item_t *subs_obj, evi_subs_p subs)
 			subs->trans_mod->proto.len, subs->trans_mod->proto.s,
 			socket.len, socket.s) < 0)
 		return -1;
-
 	if (sock->flags & EVI_EXPIRE) {
+		/* indicate the expiration time used for the event*/
 		if (add_mi_number(subs_obj, MI_SSTR("expire"), sock->expire) < 0)
-			return -1;
+				return -1;
+		now = time(0);
+		/* calculate the remaining time for the subscriber to be expired */
+		expiry_countdown = sock->expire - (now - subs->reply_sock->subscription_time);
+		if (expiry_countdown > 0) {
+			if (add_mi_number(subs_obj, MI_SSTR("ttl"), expiry_countdown) < 0)
+				return -1;
+		}else{
+			/* Mark event as expired if time-to-expire is reached*/
+			if (add_mi_string(subs_obj, MI_SSTR("ttl"), MI_SSTR("expired")) < 0)
+				return -1;
+		}
 	} else {
 		if (add_mi_string(subs_obj, MI_SSTR("expire"), MI_SSTR("never")) < 0)
 			return -1;
@@ -593,7 +648,7 @@ error:
 
 static evi_subs_p evi_get_subscriber(evi_event_p event, str sock_str)
 {
-	evi_export_t * trans_mod;
+	const evi_export_t * trans_mod;
 	evi_subs_p subscriber = NULL;
 	evi_reply_sock * sock;
 
@@ -677,6 +732,8 @@ mi_response_t *w_mi_subscribers_list(const mi_params_t *params,
 		goto error;
 
 	for (i = 0; i < events_no; i++) {
+		/* before printing the subs list check for any expired subscribers and remove them*/
+		evi_remove_expired_subs(events[i].id);
 		if (!events[i].subscribers)
 			continue;
 
@@ -703,13 +760,16 @@ mi_response_t *w_mi_subscribers_list_1(const mi_params_t *params,
 {
 	str event_s;
 	evi_event_p event;
-
+	int evid;
 	if (get_mi_string_param(params, "event", &event_s.s, &event_s.len) < 0)
 		return init_mi_param_error();
 
 	event = evi_get_event(&event_s);
 	if (!event)
 		return init_mi_error(404, MI_SSTR("Event not published"));
+	/* get the event id & before printing the subs list check for any expired subscribers and remove them*/
+	evid = evi_get_id(&event_s);
+	evi_remove_expired_subs(evid);
 
 	return mi_subscribers_list(event, NULL);
 }
@@ -721,13 +781,16 @@ mi_response_t *w_mi_subscribers_list_2(const mi_params_t *params,
 	str subs_s;
 	evi_event_p event;
 	evi_subs_p subs;
-
+	int evid;
 	if (get_mi_string_param(params, "event", &event_s.s, &event_s.len) < 0)
 		return init_mi_param_error();
 
 	event = evi_get_event(&event_s);
 	if (!event)
 		return init_mi_error(404, MI_SSTR("Event not published"));
+	/* get the event id & before printing the subs list check for any expired subscribers and remove them*/
+	evid = evi_get_id(&event_s);
+	evi_remove_expired_subs(evid);
 
 	if (get_mi_string_param(params, "socket", &subs_s.s, &subs_s.len) < 0)
 		return init_mi_param_error();
@@ -834,19 +897,56 @@ error:
 	return NULL;
 }
 
-struct mi_raise_event_dispatch {
+struct rpc_raise_event_dispatch {
 	event_id_t id;
 	evi_params_p params;
 };
 
-void mi_raise_event_rpc(int sender, void *param)
+
+void rpc_raise_event(int sender, void *param)
 {
-	struct mi_raise_event_dispatch *p = (struct mi_raise_event_dispatch *)param;
+	struct rpc_raise_event_dispatch *p = (struct rpc_raise_event_dispatch *)param;
 	if (evi_raise_event(p->id, p->params))
 		LM_ERR("cannot raise event RPC\n");
 	evi_free_shm_params(p->params);
 	shm_free(p);
 }
+
+
+int evi_dispatch_event( event_id_t id, evi_params_p params)
+{
+	evi_params_p sparams = NULL;
+	struct rpc_raise_event_dispatch *djob;
+
+	if (params) {
+		sparams = evi_dup_shm_params(params);
+		evi_free_params(params);
+		if (!sparams) {
+			LM_ERR("could not shm duplicate evi params!\n");
+			goto error;
+		}
+	}
+
+	djob = shm_malloc(sizeof (*djob));
+	if (!djob) {
+		LM_ERR("could not allocate new job!\n");
+		goto error;
+	}
+	djob->id = id;
+	djob->params = sparams;
+
+	if (ipc_dispatch_rpc(rpc_raise_event, djob) < 0) {
+		LM_ERR("could not dispatch raise event job!\n");
+		goto error;
+	}
+
+	return 0;
+error:
+	if (sparams)
+		evi_free_shm_params(sparams);
+	return -1;
+}
+
 
 mi_response_t *w_mi_raise_event(const mi_params_t *params,
 								struct mi_handler *async_hdl)
@@ -856,8 +956,7 @@ mi_response_t *w_mi_raise_event(const mi_params_t *params,
 	str tparams;
 	event_id_t id;
 	mi_item_t *values;
-	evi_params_p eparams = NULL, sparams;
-	struct mi_raise_event_dispatch *djob;
+	evi_params_p eparams = NULL;
 
 	if (get_mi_string_param(params, "event", &event_s.s, &event_s.len) < 0)
 		return init_mi_param_error();
@@ -892,26 +991,7 @@ mi_response_t *w_mi_raise_event(const mi_params_t *params,
 			break;
 	}
 
-	if (eparams) {
-		sparams = evi_dup_shm_params(eparams);
-		evi_free_params(eparams);
-		eparams = NULL;
-		if (!sparams) {
-			LM_ERR("could not duplicate evi params!\n");
-			goto error;
-		}
-		eparams = sparams;
-	}
-
-	djob = shm_malloc(sizeof (*djob));
-	if (!djob) {
-		LM_ERR("could not allocate new job!\n");
-		goto error;
-	}
-	djob->id = id;
-	djob->params = eparams;
-
-	if (ipc_dispatch_rpc(mi_raise_event_rpc, djob) < 0) {
+	if (evi_dispatch_event( id, eparams)<0) {
 		LM_ERR("could not dispatch raise event job!\n");
 		goto error;
 	}
@@ -919,6 +999,6 @@ mi_response_t *w_mi_raise_event(const mi_params_t *params,
 	return init_mi_result_ok();
 error:
 	if (eparams)
-		evi_free_shm_params(eparams);
+		evi_free_params(eparams);
 	return init_mi_error(500, MI_SSTR("Cannot Raise Event"));
 }

@@ -40,6 +40,7 @@
 #include "../../socket_info.h"
 #include "../../tsend.h"
 #include "../../trace_api.h"
+#include "../../net/net_tcp_dbg.h"
 
 #include "tcp_common_defs.h"
 #include "proto_tcp_handler.h"
@@ -84,7 +85,7 @@ trace_proto_t tprot;
 /* module  tracing parameters */
 static int trace_is_on_tmp=0, *trace_is_on;
 static char* trace_filter_route;
-static int trace_filter_route_id = -1;
+static struct script_route_ref* trace_filter_route_ref = NULL;
 /**/
 
 extern int unix_tcp_sock;
@@ -118,14 +119,19 @@ static int tcp_crlf_pingpong = 1;
 /* 0: do not drop single CRLF messages */
 static int tcp_crlf_drop = 0;
 
+/* if the handling/processing (NOT READING) of the SIP messages should
+ * be done in parallel (after one SIP msg is read, while processing it, 
+ * another READ op may be performed) */
+static int tcp_parallel_handling = 0;
 
-static cmd_export_t cmds[] = {
+
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_tcp_init, {{0, 0, 0}}, 0},
 	{0,0,{{0,0,0}},0}
 };
 
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "tcp_port",                        INT_PARAM, &tcp_port               },
 	{ "tcp_send_timeout",                INT_PARAM, &tcp_send_timeout       },
 	{ "tcp_max_msg_chunks",              INT_PARAM, &tcp_max_msg_chunks     },
@@ -138,13 +144,15 @@ static param_export_t params[] = {
 											&tcp_async_local_connect_timeout},
 	{ "tcp_async_local_write_timeout",   INT_PARAM,
 											&tcp_async_local_write_timeout  },
+	{ "tcp_parallel_handling",           INT_PARAM,
+											&tcp_parallel_handling  },
 	{ "trace_destination",               STR_PARAM, &trace_destination_name.s},
 	{ "trace_on",						 INT_PARAM, &trace_is_on_tmp        },
 	{ "trace_filter_route",				 STR_PARAM, &trace_filter_route     },
 	{0, 0, 0}
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "tcp_trace", 0, 0, 0, {
 		{w_tcp_trace_mi, {0}},
 		{w_tcp_trace_mi_1, {"trace_mode", 0}},
@@ -155,7 +163,7 @@ static mi_export_t mi_cmds[] = {
 };
 
 /* module dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 }
@@ -210,8 +218,13 @@ static int proto_tcp_init(struct proto_info *pi)
 	}
 
 	/* without async support, there is nothing to init/clean per conn */
-	if (tcp_async!=0)
+	if (tcp_async!=0) {
+		/* be sure the settings are consistent, like having a minimum 2 value
+		 * if the tcp_async is enbled */
+		if (tcp_async_max_postponed_chunks<=1)
+			tcp_async_max_postponed_chunks = 2;
 		pi->net.async_chunks= tcp_async_max_postponed_chunks;
+	}
 
 	return 0;
 }
@@ -248,9 +261,9 @@ static int mod_init(void)
 
 	*trace_is_on = trace_is_on_tmp;
 	if ( trace_filter_route ) {
-		trace_filter_route_id =
-			get_script_route_ID_by_name( trace_filter_route, sroutes->request,
-				RT_NO);
+		trace_filter_route_ref =
+			ref_script_route_by_name( trace_filter_route,
+				sroutes->request, RT_NO, REQUEST_ROUTE, 0 );
 	}
 
 	return 0;
@@ -352,17 +365,16 @@ static int proto_tcp_send(struct socket_info* send_sock,
 									union sockaddr_union* to, unsigned int id)
 {
 	struct tcp_connection *c;
+	struct tcp_conn_profile prof;
 	struct ip_addr ip;
-	int port;
 	struct timeval get,snd;
-	int fd, n;
-
 	union sockaddr_union src_su, dst_su;
+	int port = 0, fd, n, matched;
 
-	port=0;
+	matched = tcp_con_get_profile(to, &send_sock->su, send_sock->proto, &prof);
 
-	reset_tcp_vars(tcpthreshold);
-	start_expire_timer(get,tcpthreshold);
+	reset_tcp_vars(prof.send_threshold);
+	start_expire_timer(get,prof.send_threshold);
 
 	if (to){
 		su2ip_addr(&ip, to);
@@ -372,22 +384,22 @@ static int proto_tcp_send(struct socket_info* send_sock,
 		n = tcp_conn_get(id, 0, 0, PROTO_NONE, NULL, &c, &fd, NULL);
 	}else{
 		LM_CRIT("tcp_send called with null id & to\n");
-		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+		get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 		return -1;
 	}
 
 	if (n<0) {
 		/* error during conn get, return with error too */
 		LM_ERR("failed to acquire connection\n");
-		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+		get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 		return -1;
 	}
 
 	/* was connection found ?? */
 	if (c==0) {
-		if (tcp_no_new_conn) {
+		if ((matched && prof.no_new_conn) || (!matched && tcp_no_new_conn))
 			return -1;
-		}
+
 		if (!to) {
 			LM_ERR("Unknown destination - cannot open new tcp connection\n");
 			return -1;
@@ -396,11 +408,11 @@ static int proto_tcp_send(struct socket_info* send_sock,
 			tcp_async);
 		/* create tcp connection */
 		if (tcp_async) {
-			n = tcp_async_connect(send_sock, to,
+			n = tcp_async_connect(send_sock, to, &prof,
 					tcp_async_local_connect_timeout, &c, &fd, 1);
 			if ( n<0 ) {
 				LM_ERR("async TCP connect failed\n");
-				get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+				get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 				return -1;
 			}
 			/* connect succeeded, we have a connection */
@@ -417,7 +429,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 
 				/* trace the message */
 				if ( TRACE_ON( c->flags ) &&
-						check_trace_route( trace_filter_route_id, c) ) {
+						check_trace_route( trace_filter_route_ref, c) ) {
 					if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 						LM_ERR("can't create su structures for tracing!\n");
 					} else {
@@ -447,7 +459,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 			/* our first connect attempt succeeded - go ahead as normal */
 			/* trace the attempt */
 			if (  TRACE_ON( c->flags ) &&
-					check_trace_route( trace_filter_route_id, c) ) {
+					check_trace_route( trace_filter_route_ref, c) ) {
 				c->proto_flags |= F_TCP_CONN_TRACED;
 				if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 					LM_ERR("can't create su structures for tracing!\n");
@@ -458,14 +470,14 @@ static int proto_tcp_send(struct socket_info* send_sock,
 				}
 			}
 		} else {
-			if ((c=tcp_sync_connect(send_sock, to, &fd, 1))==0) {
+			if ((c=tcp_sync_connect(send_sock, to, &prof, &fd, 1))==0) {
 				LM_ERR("connect failed\n");
-				get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+				get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 				return -1;
 			}
 
 			if ( TRACE_ON( c->flags ) &&
-					check_trace_route( trace_filter_route_id, c) ) {
+					check_trace_route( trace_filter_route_ref, c) ) {
 				c->proto_flags |= F_TCP_CONN_TRACED;
 				if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 					LM_ERR("can't create su structures for tracing!\n");
@@ -495,7 +507,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 		c->proto_flags |= F_TCP_CONN_TRACED;
 	}
 
-	get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
+	get_time_difference(get,prof.send_threshold,tcp_timeout_con_get);
 
 	/* now we have a connection, let's see what we can do with it */
 	/* BE CAREFUL now as we need to release the conn before exiting !!! */
@@ -539,15 +551,15 @@ static int proto_tcp_send(struct socket_info* send_sock,
 send_it:
 	LM_DBG("sending via fd %d...\n",fd);
 
-	start_expire_timer(snd,tcpthreshold);
+	start_expire_timer(snd,prof.send_threshold);
 
 	n = tcp_write_on_socket(c, fd, buf, len,
 			tcp_send_timeout, tcp_async_local_write_timeout);
 
-	get_time_difference(snd,tcpthreshold,tcp_timeout_send);
-	stop_expire_timer(get,tcpthreshold,"tcp ops",buf,(int)len,1);
+	get_time_difference(snd,prof.send_threshold,tcp_timeout_send);
+	stop_expire_timer(get,prof.send_threshold,"tcp ops",buf,(int)len,1);
 
-	tcp_conn_set_lifetime( c, tcp_con_lifetime);
+	tcp_conn_reset_lifetime(c);
 
 	LM_DBG("after write: c= %p n/len=%d/%d fd=%d\n",c, n, len, fd);
 	/* LM_DBG("buf=\n%.*s\n", (int)len, buf); */
@@ -635,7 +647,7 @@ again:
  */
 static int tcp_read_req(struct tcp_connection* con, int* bytes_read)
 {
-	int bytes;
+	int bytes, rc;
 	int total_bytes;
 	struct tcp_req* req;
 
@@ -649,7 +661,7 @@ static int tcp_read_req(struct tcp_connection* con, int* bytes_read)
 			ip_addr2a( &con->rcv.dst_ip ), con->rcv.dst_port );
 
 		if ( TRACE_ON( con->flags ) &&
-					check_trace_route( trace_filter_route_id, con) ) {
+					check_trace_route( trace_filter_route_ref, con) ) {
 			if ( tcpconn2su( con, &src_su, &dst_su) < 0 ) {
 				LM_ERR("can't create su structures for tracing!\n");
 			} else {
@@ -665,9 +677,9 @@ static int tcp_read_req(struct tcp_connection* con, int* bytes_read)
 
 	if (con->con_req) {
 		req=con->con_req;
-		LM_DBG("Using the per connection buff \n");
+		LM_DBG("Using the per connection buff for conn %p\n",con);
 	} else {
-		LM_DBG("Using the global ( per process ) buff \n");
+		LM_DBG("Using the global ( per process ) buff for conn %p\n",con);
 		init_tcp_req(&tcp_current_req, 0);
 		req=&tcp_current_req;
 	}
@@ -718,18 +730,24 @@ again:
 		goto error;
 	}
 
-	switch (tcp_handle_req(req, con, tcp_max_msg_chunks) ) {
+	int parallel_handling = tcp_is_default_profile(con->profile) ?
+			tcp_parallel_handling : (con->profile.parallel_read == 2);
+	int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
+			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : tcp_max_msg_chunks;
+
+	switch ((rc = tcp_handle_req(req,con,max_chunks,parallel_handling))){
 		case 1:
 			goto again;
 		case -1:
 			goto error;
 	}
 
-	LM_DBG("tcp_read_req end\n");
+	LM_DBG("tcp_read_req end for conn %p, req is %p\n",con,con->con_req);
 done:
 	if (bytes_read) *bytes_read=total_bytes;
-	/* connection will be released */
-	return 0;
+
+	return rc == 2   ?  1  /* connection is already released! */
+	       /* 0,1? */:  0; /* connection will be released */
 error:
 	/* connection will be released as ERROR */
 	return -1;

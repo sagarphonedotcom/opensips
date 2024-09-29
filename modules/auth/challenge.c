@@ -60,20 +60,21 @@
 
 #define QOP_AUTH	  ", qop=\"" QOP_AUTH_STR "\""
 #define QOP_AUTH_INT	  ", qop=\"" QOP_AUTHINT_STR "\""
-#define QOP_AUTH_BOTH	  ", qop=\"" QOP_AUTH_STR "," QOP_AUTHINT_STR "\""
+#define QOP_AUTH_BOTH_AAI	  ", qop=\"" QOP_AUTH_STR "," QOP_AUTHINT_STR "\""
+#define QOP_AUTH_BOTH_AIA	  ", qop=\"" QOP_AUTHINT_STR "," QOP_AUTH_STR "\""
 #define STALE_PARAM	  ", stale=true"
 #define DIGEST_REALM	  ": Digest realm=\""
 #define DIGEST_NONCE	  "\", nonce=\""
 #define DIGEST_ALGORITHM  ", algorithm="
+#define DIGEST_OPAQUE  ", opaque=\""
 
 
 /*
  * Create {WWW,Proxy}-Authenticate header field
  */
-static inline char *build_auth_hf(int _retries, int _stale,
-    const str_const *_realm, int* _len, int _qop, alg_t alg,
-    const str_const *alg_val, const str_const* _hf_name,
-    int index)
+char *build_auth_hf(struct nonce_context *ncp, struct nonce_params *calc_np,
+	int _stale, const str_const *_realm, int* _len,
+    const str_const *alg_val, const str_const* _hf_name, const str_const *opaque)
 {
 	char *hf, *p;
 	str_const alg_param;
@@ -81,15 +82,25 @@ static inline char *build_auth_hf(int _retries, int _stale,
 	str_const stale_param = STR_NULL_const;
 	const str_const digest_realm = str_const_init(DIGEST_REALM);
 	const str_const nonce_param = str_const_init(DIGEST_NONCE);
-	struct nonce_params calc_np;
+	str_const opaque_param;
 
-	if (_qop) {
-		if (_qop == QOP_TYPE_AUTH) {
+	if (calc_np->qop) {
+		switch (calc_np->qop) {
+		case QOP_AUTH_D:
 			qop_param = str_const_init(QOP_AUTH);
-		} else if (_qop == QOP_TYPE_AUTH_INT) {
+			break;
+		case QOP_AUTHINT_D:
 			qop_param = str_const_init(QOP_AUTH_INT);
-		} else {
-			qop_param = str_const_init(QOP_AUTH_BOTH);
+			break;
+		case QOP_AUTHINT_AUTH_D:
+			qop_param = str_const_init(QOP_AUTH_BOTH_AAI);
+			break;
+		case QOP_AUTH_AUTHINT_D:
+			qop_param = str_const_init(QOP_AUTH_BOTH_AIA);
+			break;
+		default:
+			LM_ERR("Wrong _qop value: %d\n", calc_np->qop);
+			abort();
 		}
 	}
 	if (_stale)
@@ -111,6 +122,11 @@ static inline char *build_auth_hf(int _retries, int _stale,
 		*_len += alg_param.len + alg_val->len;
 	}
 
+	if (opaque != NULL) {
+		opaque_param = str_const_init(DIGEST_OPAQUE);
+		*_len += opaque_param.len + opaque->len + 1 /* '"' */;
+	}
+
 	p=hf=pkg_malloc(*_len+1);
 	if (!hf) {
 		LM_ERR("no pkg memory left\n");
@@ -121,21 +137,13 @@ static inline char *build_auth_hf(int _retries, int _stale,
 	memcpy(p, digest_realm.s, digest_realm.len);p+=digest_realm.len;
 	memcpy(p, _realm->s, _realm->len);p+=_realm->len;
 	memcpy(p, nonce_param.s, nonce_param.len);p+=nonce_param.len;
-	if (clock_gettime(CLOCK_REALTIME, &calc_np.expires) != 0) {
-		LM_ERR("clock_gettime failed\n");
-		goto e2;
-	}
-	calc_np.expires.tv_sec += nonce_expire;
-	calc_np.index = index;
-	calc_np.qop = _qop;
-	calc_np.alg = (alg == ALG_UNSPEC) ? ALG_MD5 : alg;
-	if (calc_nonce(ncp, p, &calc_np) != 0) {
+	if (calc_nonce(ncp, p, calc_np) != 0) {
 		LM_ERR("calc_nonce failed\n");
 		goto e2;
 	}
 	p+=ncp->nonce_len;
 	*p='"';p++;
-	if (_qop) {
+	if (calc_np->qop) {
 		memcpy(p, qop_param.s, qop_param.len);
 		p+=qop_param.len;
 	}
@@ -149,6 +157,14 @@ static inline char *build_auth_hf(int _retries, int _stale,
 		memcpy(p, alg_val->s, alg_val->len);
 		p += alg_val->len;
 	}
+	if (opaque != NULL) {
+		memcpy(p, opaque_param.s, opaque_param.len);
+		p += opaque_param.len;
+		memcpy(p, opaque->s, opaque->len);
+		p += opaque->len;
+		*p='"';p++;
+	}
+
 	memcpy(p, CRLF, CRLF_LEN ); p+=CRLF_LEN;
 	*p=0; /* zero terminator, just in case */
 
@@ -164,7 +180,7 @@ e1:
 /*
  * Create and send a challenge
  */
-static inline int challenge(struct sip_msg* _msg, str *realm, int _qop,
+static inline int challenge(struct sip_msg* _msg, str *realm, qop_type_t _qop,
     int _code, const str *reason, const str_const *_challenge_msg, int algmask)
 {
 	struct hdr_field* h = NULL;
@@ -175,6 +191,7 @@ static inline int challenge(struct sip_msg* _msg, str *realm, int _qop,
 	str auth_hfs[LAST_ALG_SPTD - FIRST_ALG_SPTD + 1];
 	const str_const *alg_val;
 	const struct digest_auth_calc *digest_calc;
+	struct nonce_params calc_np;
 
 	switch(_code) {
 	case WWW_AUTH_CODE:
@@ -204,9 +221,9 @@ static inline int challenge(struct sip_msg* _msg, str *realm, int _qop,
 	}
 
 	nalgs = 0;
-	if (algmask >= ALGFLG_SHA256 && _qop == 0) {
-		/* RFC8760 mandates QOP */
-		_qop = QOP_TYPE_AUTH;
+	if (algmask >= ALG_MD5SESS && _qop == QOP_UNSPEC_D) {
+		/* RFC8760 algos and XYZ-sess mandates QOP */
+		_qop = QOP_AUTH_D;
 	}
 	if(!disable_nonce_check) {
 		/* get the nonce index and mark it as used */
@@ -218,6 +235,15 @@ static inline int challenge(struct sip_msg* _msg, str *realm, int _qop,
 		}
 		LM_DBG("nonce index= %d\n", index);
 	}
+
+	if (clock_gettime(CLOCK_REALTIME, &calc_np.expires) != 0) {
+		LM_ERR("clock_gettime failed\n");
+		return -1;
+	}
+	calc_np.expires.tv_sec += nonce_expire;
+	calc_np.index = index;
+	calc_np.qop = _qop;
+
 	for (i = LAST_ALG_SPTD; i >= FIRST_ALG_SPTD; i--) {
 		if ((algmask & ALG2ALGFLG(i)) == 0)
 			continue;
@@ -225,9 +251,9 @@ static inline int challenge(struct sip_msg* _msg, str *realm, int _qop,
 		if (digest_calc == NULL)
 			continue;
 		alg_val = (i == ALG_UNSPEC) ? NULL : &digest_calc->algorithm_val;
-		auth_hfs[nalgs].s = build_auth_hf(0, (cred ? cred->stale : 0),
-		    str2const(realm), &auth_hfs[nalgs].len, _qop, i, alg_val,
-		    _challenge_msg, index);
+		calc_np.alg = (i == ALG_UNSPEC) ? ALG_MD5 : i;
+		auth_hfs[nalgs].s = build_auth_hf(ncp, &calc_np, (cred ? cred->stale : 0),
+		    str2const(realm), &auth_hfs[nalgs].len, alg_val, _challenge_msg, NULL);
 		if (!auth_hfs[nalgs].s) {
 			LM_ERR("failed to generate nonce\n");
 			ret = -1;
@@ -253,7 +279,7 @@ failure:
 int fixup_qop(void** param)
 {
 	str *s = (str*)*param;
-	int qop_type = 0;
+	qop_type_t qop_type = QOP_UNSPEC_D;
 	csv_record *q_csv, *q;
 
 	q_csv = parse_csv_record(s);
@@ -263,15 +289,15 @@ int fixup_qop(void** param)
 	}
 	for (q = q_csv; q; q = q->next) {
 		if (!str_strcmp(&q->s, const_str(QOP_AUTH_STR)))  {
-			if (qop_type == QOP_TYPE_AUTH_INT)
-				qop_type = QOP_TYPE_BOTH;
+			if (qop_type == QOP_AUTHINT_D)
+				qop_type = QOP_AUTHINT_AUTH_D;
 			else
-				qop_type = QOP_TYPE_AUTH;
+				qop_type = QOP_AUTH_D;
 		} else if (!str_strcmp(&q->s, const_str(QOP_AUTHINT_STR))) {
-			if (qop_type == QOP_TYPE_AUTH)
-				qop_type = QOP_TYPE_BOTH;
+			if (qop_type == QOP_AUTH_D)
+				qop_type = QOP_AUTH_AUTHINT_D;
 			else
-				qop_type = QOP_TYPE_AUTH_INT;
+				qop_type = QOP_AUTHINT_D;
 		} else {
 			LM_ERR("Bad qop type\n");
 			free_csv_record(q_csv);
@@ -291,7 +317,7 @@ int www_challenge(struct sip_msg* _msg, str* _realm, void* _qop,
     intptr_t algmask)
 {
 
-	return challenge(_msg, _realm, (int)(long)_qop, WWW_AUTH_CODE,
+	return challenge(_msg, _realm, (qop_type_t)(long)_qop, WWW_AUTH_CODE,
 	    &str_init(MESSAGE_401), &str_const_init(WWW_AUTH_HDR),
 	    algmask ? algmask : ALGFLG_UNSPEC);
 }
@@ -304,7 +330,7 @@ int proxy_challenge(struct sip_msg* _msg, str* _realm, void* _qop,
     intptr_t algmask)
 {
 
-	return challenge(_msg, _realm, (int)(long)_qop, PROXY_AUTH_CODE,
+	return challenge(_msg, _realm, (qop_type_t)(long)_qop, PROXY_AUTH_CODE,
 	    &str_init(MESSAGE_407), &str_const_init(PROXY_AUTH_HDR),
 	    algmask ? algmask : ALGFLG_UNSPEC);
 }

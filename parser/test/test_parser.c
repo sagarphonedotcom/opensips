@@ -47,6 +47,20 @@ void test_parse_uri(void)
 	ok(!u.user.s, "puri-0.5");
 	ok(u.user.len == 0, "puri-0.6");
 
+	/* URI port parsing tests, with or w/o a username */
+	ok(!parse_uri(STR_L("sip:localhost@atlanta.org:0"), &u), "puri-0.7");
+	ok(!parse_uri(STR_L("sip:localhost@atlanta.org:65535"), &u), "puri-0.8");
+	ok(parse_uri(STR_L("sip:localhost@atlanta.org:65536"), &u), "puri-0.9");
+	ok(parse_uri(STR_L("sip:localhost@atlanta.org:55555555555555555555"), &u), "puri-0.10");
+	ok(!parse_uri(STR_L("sip:localhost:0@atlanta.org"), &u), "puri-0.11");
+	ok(!parse_uri(STR_L("sip:localhost:65535@atlanta.org"), &u), "puri-0.12");
+	ok(!parse_uri(STR_L("sip:localhost:65536@atlanta.org"), &u), "puri-0.13");
+	ok(!parse_uri(STR_L("sip:localhost:5555555555555@atlanta.org"), &u), "puri-0.14");
+	ok(!parse_uri(STR_L("sip:localhost:0"), &u), "puri-0.15");
+	ok(!parse_uri(STR_L("sip:localhost:65535"), &u), "puri-0.16");
+	ok(parse_uri(STR_L("sip:localhost:65536"), &u), "puri-0.17");
+	ok(parse_uri(STR_L("sip:localhost:55555555555"), &u), "puri-0.18");
+
 	in = *_str("sip:alice@atlanta.org;user=phone");
 	ok(parse_uri(in.s, in.len, &u) == 0, "puri-1");
 	ok(str_match(&u.user_param, const_str("user=phone")), "puri-2");
@@ -129,10 +143,62 @@ void test_parse_uri(void)
 	ok(str_match(&u.pn_purr_val, const_str("t")), "puri-43");
 }
 
+static const struct tts {
+	const char *tmsg;
+	int tres;
+} tset[] = {
+	{
+		/* test for read overflows on EoH parsing */
+		"e \xff\xff\xff\xff     \xff\n\xff\xff  ",
+		-1,
+	}, {
+		/* test for read overflows on To header param parsing */
+		"d  \x02\x80\0\nt\0:G;150=\"a8",
+		-1,
+	}, {
+		/* test for read overflows on bad header body (no \n ending) */
+		"m  r\nu:c \x1b\r   : ]",
+		-1,
+	}, {
+		/* test for read overflow on Via header (the @end pointer) */
+		"Q e  M\nV:SIP/2.0  /1P 4rr;TT;TT;TT;TT;TT;TT;T\xd2;TT;",
+		-1,
+	}, {
+		/* test for read overflow on Via header param (the @end pointer) */
+		"A  !\nV:SIP/2.0/? M;recEIVeD\n ",
+		-1,
+	}, {
+		/* test for read overflow on Content-Length parsing error (@end) */
+		"v D \xd7\r\xeeV:1\r\nl:5\r*",
+		-1,
+	}, {
+		/* test for read overflow during Content-Length ws trimming (@end) */
+		"abcde J    \x09:5\nL\x09:\x09\n",
+		-1,
+	},
+};
+
+void test_parse_msg(void)
+{
+	int i;
+
+	for (i = 0; i < sizeof tset/sizeof *tset; i++) {
+		struct sip_msg msg;
+
+		memset(&msg, 0, sizeof msg);
+		msg.buf = (char *)tset[i].tmsg;
+		msg.len = strlen(msg.buf);
+
+		ok(parse_msg(msg.buf, msg.len, &msg) == tset[i].tres, "parse-msg-t%d", i);
+	}
+}
+
+
 void test_parser(void)
 {
+	test_parse_uri();
+	test_parse_msg();
 	test_parse_qop_val();
 	test_parse_fcaps();
-	test_parse_uri();
 	test_parse_authenticate_body();
 }

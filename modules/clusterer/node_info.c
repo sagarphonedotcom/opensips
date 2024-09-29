@@ -110,6 +110,11 @@ int add_node_info(node_info_t **new_info, cluster_info_t **cl_list, int *int_val
 		*cl_list = cluster;
 	}
 
+	if (get_node_by_id(cluster, int_vals[INT_VALS_NODE_ID_COL])) {
+		LM_DBG("Node [%d] already exists\n", int_vals[INT_VALS_NODE_ID_COL]);
+		return 0;
+	}
+
 	*new_info = shm_malloc(sizeof **new_info);
 	if (!*new_info) {
 		LM_ERR("no more shm memory\n");
@@ -233,8 +238,10 @@ int add_node_info(node_info_t **new_info, cluster_info_t **cl_list, int *int_val
 
 	(*new_info)->ls_seq_no = -1;
 	(*new_info)->top_seq_no = -1;
+	(*new_info)->cap_seq_no = -1;
 	(*new_info)->ls_timestamp = 0;
 	(*new_info)->top_timestamp = 0;
+	(*new_info)->cap_timestamp = 0;
 
 	(*new_info)->sp_info = shm_malloc(sizeof(struct node_search_info));
 	if (!(*new_info)->sp_info) {
@@ -485,10 +492,14 @@ int load_db_info(db_func_t *dr_dbf, db_con_t* db_hdl, str *db_table,
 		/* add info to backing list */
 		if ((rc = add_node_info(&_, cl_list, int_vals, str_vals)) != 0) {
 			LM_ERR("Unable to add node info to backing list\n");
-			if (rc < 0)
+			if (rc < 0) {
 				return -1;
-			else
+			} else if (int_vals[INT_VALS_NODE_ID_COL] == current_id) {
+				LM_ERR("Invalid info for local node\n");
+				return -1;
+			} else {
 				return 2;
+			}
 		}
 	}
 
@@ -865,24 +876,25 @@ clusterer_node_t *api_get_next_hop(int cluster_id, int node_id)
 	cluster = get_cluster_by_id(cluster_id);
 	if (!cluster) {
 		LM_DBG("Cluster id: %d not found!\n", cluster_id);
-		return NULL;
+		goto error;
 	}
 	dest_node = get_node_by_id(cluster, node_id);
 	if (!dest_node) {
 		LM_DBG("Node id: %d no found!\n", node_id);
-		return NULL;
+		goto error;
 	}
 
 	if (get_next_hop(dest_node) == 0) {
 		LM_DBG("No other path to node: %d\n", node_id);
-		return NULL;
+		goto error;
 	}
 
 	lock_get(dest_node->lock);
 
 	if (add_clusterer_node(&ret, dest_node->next_hop) < 0) {
+		lock_release(dest_node->lock);
 		LM_ERR("Failed to allocate next hop\n");
-		return NULL;
+		goto error;
 	}
 
 	lock_release(dest_node->lock);
@@ -890,6 +902,9 @@ clusterer_node_t *api_get_next_hop(int cluster_id, int node_id)
 	lock_stop_read(cl_list_lock);
 
 	return ret;
+error:
+	lock_stop_read(cl_list_lock);
+	return NULL;
 }
 
 void api_free_next_hop(clusterer_node_t *next_hop)

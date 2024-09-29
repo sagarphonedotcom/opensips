@@ -255,28 +255,45 @@ static int set_dh_params_db(WOLFSSL_CTX * ctx, str *blob)
 	return 0;
 }
 
-static int set_ec_params(WOLFSSL_CTX * ctx, const char* curve_name)
+static int set_ec_params(WOLFSSL_CTX * ctx, enum tls_method method,
+	int is_server, char *curve_name)
 {
 	int curve = 0;
-	if (curve_name) {
-		curve = wolfSSL_OBJ_txt2nid(curve_name);
-	}
-	if (curve > 0) {
-		WOLFSSL_EC_KEY *ecdh = wolfSSL_EC_KEY_new_by_curve_name(curve);
-		if (! ecdh) {
-			LM_ERR("unable to create EC curve\n");
+
+	if (is_server) {
+		if (curve_name)
+			curve = wolfSSL_OBJ_txt2nid(curve_name);
+		if (curve > 0) {
+			WOLFSSL_EC_KEY *ecdh = wolfSSL_EC_KEY_new_by_curve_name(curve);
+			if (!ecdh) {
+				LM_ERR("unable to create EC curve\n");
+				return -1;
+			}
+			if (1 != wolfSSL_SSL_CTX_set_tmp_ecdh (ctx, ecdh)) {
+				LM_ERR("unable to set tmp_ecdh\n");
+				return -1;
+			}
+			wolfSSL_EC_KEY_free(ecdh);
+		} else {
+			LM_ERR("unable to find the EC curve\n");
 			return -1;
 		}
-		if (1 != wolfSSL_SSL_CTX_set_tmp_ecdh (ctx, ecdh)) {
-			LM_ERR("unable to set tmp_ecdh\n");
-			return -1;
+	} else {
+		if (method == TLS_USE_TLSv1_3) {
+			if (wolfSSL_CTX_set1_groups_list(ctx, curve_name) ==
+				WOLFSSL_FAILURE) {
+				LM_ERR("Failed to set EC curve\n");
+				return -1;
+			}
+		} else {
+			if (wolfSSL_CTX_set1_curves_list(ctx, curve_name) ==
+				WOLFSSL_FAILURE) {
+				LM_ERR("Failed to set EC curve\n");
+				return -1;
+			}
 		}
-		wolfSSL_EC_KEY_free(ecdh);
 	}
-	else {
-		LM_ERR("unable to find the EC curve\n");
-		return -1;
-	}
+
 	return 0;
 }
 
@@ -417,9 +434,11 @@ static int load_ca_dir(WOLFSSL_CTX * ctx, char *directory)
 {
 	int rc;
 
-	if ((rc = wolfSSL_CTX_load_verify_locations(ctx, 0, directory)) !=
+	if ((rc = wolfSSL_CTX_load_verify_locations_ex(ctx, 0, directory,
+		WOLFSSL_LOAD_FLAG_IGNORE_ERR|WOLFSSL_LOAD_FLAG_IGNORE_BAD_PATH_ERR|
+		WOLFSSL_LOAD_FLAG_IGNORE_ZEROFILE)) !=
 		SSL_SUCCESS) {
-		LM_WARN("unable to load ca directory '%s' (ret=%d)\n", directory, rc);
+		LM_ERR("unable to load ca directory '%s' (ret=%d)\n", directory, rc);
 		return -1;
 	}
 
@@ -430,7 +449,7 @@ static int load_ca_dir(WOLFSSL_CTX * ctx, char *directory)
 int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 {
 	int verify_mode = 0;
-	int rc = -1;
+	int ret = -1;
 
 	if (d->method_str.s && tls_get_method(&d->method_str, &d->method,
 		&d->method_max) < 0)
@@ -440,7 +459,7 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 	if (!d->ctx) {
 		LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
 			d->name.len, d->name.s);
-		return -1;
+		goto end;
 	}
 
 	if (d->method != TLS_USE_SSLv23) {
@@ -450,7 +469,7 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 				ssl_versions[d->method_max - 1]) != WOLFSSL_SUCCESS)) {
 			LM_ERR("cannot enforce ssl version for tls domain '%.*s'\n",
 					d->name.len, ZSW(d->name.s));
-			return -1;
+			goto end;
 		}
 	}
 
@@ -482,7 +501,7 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 		}
 	} else {
 		if (d->verify_cert ) {
-			/* This is turned on by default in wolfSSL */
+			verify_mode = SSL_VERIFY_PEER;
 			LM_INFO("server verification activated.\n");
 		} else {
 			verify_mode = SSL_VERIFY_NONE;
@@ -495,50 +514,51 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 
 	if (!(d->flags & DOM_FLAG_DB) || init_flags & TLS_DOM_DH_FILE_FL) {
 		if (d->dh_param.s && set_dh_params(d->ctx, d->dh_param.s) < 0)
-			return -1;
+			goto end;
 	} else {
 		set_dh_params_db(d->ctx, &d->dh_param);
 	}
 
 	if (!d->tls_ec_curve)
 		LM_NOTICE("No EC curve defined\n");
-	else if (set_ec_params(d->ctx, d->tls_ec_curve) < 0)
-		return -1;
+	else if (set_ec_params(d->ctx, d->method, d->flags & DOM_FLAG_SRV,
+		d->tls_ec_curve) < 0)
+		goto end;
 
 	if (d->ciphers_list != 0 &&
 		wolfSSL_CTX_set_cipher_list(d->ctx, d->ciphers_list) != SSL_SUCCESS) {
 		LM_ERR("failure to set SSL context "
 				"cipher list '%s'\n", d->ciphers_list);
-		return -1;
+		goto end;
 	}
 
 	if (!(d->flags & DOM_FLAG_DB) || init_flags & TLS_DOM_CERT_FILE_FL) {
 		if (load_certificate(d->ctx, d->cert.s) < 0)
-			return -1;
+			goto end;
 	} else {
 		if (load_certificate_db(d->ctx, &d->cert) < 0)
-			return -1;
+			goto end;
 	}
 
 	if (d->crl_directory && load_crl(d->ctx, d->crl_directory,
 		d->crl_check_all) < 0)
-		return -1;
+		goto end;
 
 	if (!(d->flags & DOM_FLAG_DB) || init_flags & TLS_DOM_CA_FILE_FL) {
-		if (d->ca.s && (rc = load_ca(d->ctx, d->ca.s)) < 0)
-			return -1;
+		if (d->ca.s && load_ca(d->ctx, d->ca.s) < 0)
+			goto end;
 	} else {
-		if ((rc = load_ca_db(d->ctx, &d->ca)) < 0)
-			return -1;
+		if (load_ca_db(d->ctx, &d->ca) < 0)
+			goto end;
 	}
 
-	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0 &&
-		rc == -1) {
-		LM_ERR("No CA loaded\n");
-		return -1;
-	}
+	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0)
+		goto end;
 
-	return 0;
+	ret = 0;
+end:
+	wolfSSL_ERR_clear_error();
+	return ret;
 }
 
 static int load_private_key(WOLFSSL_CTX * ctx, char *filename)

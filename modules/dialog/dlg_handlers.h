@@ -63,6 +63,7 @@ static inline int dlg_match_mode_str_to_int(const str *in)
 
 struct _dlg_cseq{
 	struct dlg_cell *dlg;
+	int dst_leg;
 	str cseq;
 };
 
@@ -121,6 +122,8 @@ void dlg_onreq(struct cell* t, int type, struct tmcb_params *param);
 void dlg_onroute(struct sip_msg* req, str *rr_param, void *param);
 
 void dlg_ontimeout( struct dlg_tl *tl);
+
+void dlg_ondelete(struct dlg_tl *tl);
 
 str *dlg_get_did(struct dlg_cell *dlg);
 
@@ -209,6 +212,6 @@ static inline void get_totag(struct sip_msg *msg, str *tag)
 	}
 }
 
-int test_and_set_dlg_flag(struct dlg_cell *dlg, unsigned long index,
-		unsigned long value);
+int test_and_set_dlg_flag(struct dlg_cell *dlg, unsigned int mask,
+		unsigned int value);
 #endif

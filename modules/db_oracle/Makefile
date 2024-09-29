@@ -1,5 +1,3 @@
-# $Id$
-#
 # WARNING: do not run this directly, it should be run by the master Makefile
 
 include ../../Makefile.defs
@@ -11,7 +9,6 @@ UTILS_DIR?=../../utils/
 
 # can be defined for non standard placement of oracle so's
 ORAPATH=
-LIBS=
 
 # use for multiple client sdk version install
 ifneq ($(ORAVERSION),)

@@ -115,7 +115,7 @@ mi_response_t *mi_pcres_reload(const mi_params_t *params,
 /*
  * Exported functions
  */
-static cmd_export_t cmds[] =
+static const cmd_export_t cmds[] =
 {
 	{"pcre_match", (cmd_function)w_pcre_match, {
 		{CMD_PARAM_STR,0,0},
@@ -133,7 +133,7 @@ static cmd_export_t cmds[] =
 /*
  * Exported parameters
  */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"file",                STR_PARAM,  &file                },
 	{"max_groups",          INT_PARAM,  &max_groups          },
 	{"group_max_size",      INT_PARAM,  &group_max_size      },
@@ -148,7 +148,7 @@ static param_export_t params[] = {
 /*
  * Exported MI functions
  */
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "regex_reload", 0, 0, 0, {
 		{mi_pcres_reload, {0}},
 		{EMPTY_MI_RECIPE}}
@@ -326,7 +326,8 @@ static int load_pcres(int action)
 			i++;
 			/* Check if there are more patterns than the max value */
 			if (i >= max_groups) {
-				LM_ERR("max patterns exceeded\n");
+				i--;
+				LM_ERR("max_groups: %d exceeded\n",max_groups);
 				fclose(f);
 				goto err;
 			}

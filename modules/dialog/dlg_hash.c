@@ -118,7 +118,7 @@ int init_dlg_table(unsigned int size)
 		goto error0;
 	}
 
-#if defined(DBG_STRUCT_HIST) && defined(DBG_DIALOG)
+#if defined(DBG_DIALOG)
 	dlg_hist = shl_init("dialog hist", 10000, 0);
 	if (!dlg_hist) {
 		LM_ERR("oom\n");
@@ -165,6 +165,7 @@ error0:
 
 static inline void free_dlg_dlg(struct dlg_cell *dlg)
 {
+	struct dlg_leg_cseq_map *map, *tmp;
 	struct dlg_val *dv;
 	unsigned int i;
 
@@ -203,6 +204,12 @@ static inline void free_dlg_dlg(struct dlg_cell *dlg)
 				shm_free(dlg->legs[i].tmp_out_sdp.s);
 			if (dlg->legs[i].tmp_in_sdp.s)
 				shm_free(dlg->legs[i].tmp_in_sdp.s);
+			/* destroy dialog mappings as well */
+			for (map = dlg->legs[i].cseq_maps; map;) {
+				tmp = map;
+				map = map->next;
+				shm_free(tmp);
+			}
 		}
 		shm_free(dlg->legs);
 	}
@@ -218,6 +225,13 @@ static inline void free_dlg_dlg(struct dlg_cell *dlg)
 
 	if (dlg->terminate_reason.s)
 		shm_free(dlg->terminate_reason.s);
+
+	if (dlg->rt_on_answer)
+		shm_free(dlg->rt_on_answer);
+	if (dlg->rt_on_hangup)
+		shm_free(dlg->rt_on_hangup);
+	if (dlg->rt_on_timeout)
+		shm_free(dlg->rt_on_timeout);
 
 #ifdef DBG_DIALOG
 	sh_log(dlg->hist, DLG_DESTROY, "ref %d", dlg->ref);
@@ -252,7 +266,7 @@ void destroy_dlg(struct dlg_cell *dlg)
 			dlg_leg_print_info( dlg, callee_idx(dlg), tag));
 	}
 
-	run_dlg_callbacks(DLGCB_DESTROY , dlg, 0, DLG_DIR_NONE, NULL, 0, 1);
+	run_dlg_callbacks(DLGCB_DESTROY , dlg, 0, DLG_DIR_NONE, -1, NULL, 0, 1);
 
 	free_dlg_dlg(dlg);
 }
@@ -307,7 +321,7 @@ struct dlg_cell* build_new_dlg( str *callid, str *from_uri, str *to_uri,
 
 	memset(dlg, 0, len);
 
-#if defined(DBG_STRUCT_HIST) && defined(DBG_DIALOG)
+#if defined(DBG_DIALOG)
 	dlg->hist = sh_push(dlg, dlg_hist);
 	if (!dlg->hist) {
 		LM_ERR("oom\n");
@@ -470,10 +484,16 @@ int dlg_update_leg_info(int leg_idx, struct dlg_cell *dlg, str* tag, str *rr,
 	struct dlg_leg *leg;
 	rr_t *head = NULL, *rrp;
 
+	/*
+	 * we should not limit the number of dialog legs to the number of tm
+	 * branches, as for a single branch, we can have multiple legs (resulted
+	 * due to parallel forking) downstream.
+	 *
 	if (leg_idx >= MAX_BRANCHES) {
 		LM_WARN("invalid callee leg index (branch id part): %d\n", leg_idx);
 		return -1;
 	}
+	*/
 
 	if (ensure_leg_array(leg_idx + 1, dlg) != 0)
 		return -1;
@@ -744,7 +764,8 @@ int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,
 
 
 
-struct dlg_cell* lookup_dlg( unsigned int h_entry, unsigned int h_id)
+struct dlg_cell* lookup_dlg( unsigned int h_entry, unsigned int h_id,
+															int active_only )
 {
 	struct dlg_cell *dlg;
 	struct dlg_entry *d_entry;
@@ -758,7 +779,7 @@ struct dlg_cell* lookup_dlg( unsigned int h_entry, unsigned int h_id)
 
 	for( dlg=d_entry->first ; dlg ; dlg=dlg->next ) {
 		if (dlg->h_id == h_id) {
-			if (dlg->state==DLG_STATE_DELETED) {
+			if (active_only && dlg->state==DLG_STATE_DELETED) {
 				dlg_unlock( d_table, d_entry);
 				goto not_found;
 			}
@@ -789,6 +810,7 @@ struct dlg_cell* get_dlg( str *callid, str *ftag, str *ttag,
 	struct dlg_cell *dlg;
 	struct dlg_entry *d_entry;
 	unsigned int h_entry;
+	unsigned int dst_leg_backup = *dst_leg;
 
 	h_entry = dlg_hash(callid);
 	d_entry = &(d_table->entries[h_entry]);
@@ -814,12 +836,16 @@ struct dlg_cell* get_dlg( str *callid, str *ftag, str *ttag,
 				dlg->legs[DLG_CALLER_LEG].contact.len);
 #endif
 		if (match_dialog( dlg, callid, ftag, ttag, dir, dst_leg)==1) {
-			if (dlg->state==DLG_STATE_DELETED)
+			if (dlg->state==DLG_STATE_DELETED) {
 				/* even if matched, skip the deleted dialogs as they may be
 				   a previous unsuccessful attempt of established call
 				   with the same callid and fromtag - like in auth/challenge
 				   case -bogdan */
+				/* since this dialog is not considered matched, then the
+				 * dst_leg should not be populated either */
+				*dst_leg = dst_leg_backup;
 				continue;
+			}
 			DBG_REF(dlg, 1);
 			dlg->ref++;
 			dlg_unlock( d_table, d_entry);
@@ -836,7 +862,7 @@ struct dlg_cell* get_dlg( str *callid, str *ftag, str *ttag,
 }
 
 
-struct dlg_cell* get_dlg_by_val(str *attr, str *val)
+struct dlg_cell* get_dlg_by_val(struct sip_msg *msg, str *attr, pv_spec_t *val)
 {
 	struct dlg_entry *d_entry;
 	struct dlg_cell  *dlg;
@@ -853,7 +879,7 @@ struct dlg_cell* get_dlg_by_val(str *attr, str *val)
 			LM_DBG("dlg in state %d to check\n",dlg->state);
 			if ( dlg->state>DLG_STATE_CONFIRMED )
 				continue;
-			if (check_dlg_value_unsafe( dlg, attr, val)==0) {
+			if (check_dlg_value_unsafe(msg, dlg, attr, val)==0) {
 				ref_dlg_unsafe( dlg, 1);
 				dlg_unlock( d_table, d_entry);
 				return dlg;
@@ -926,6 +952,12 @@ struct dlg_cell* get_dlg_by_did(str *did, int active_only)
 	return NULL;
 }
 
+struct dlg_cell* get_dlg_by_ids(unsigned int h_entry, unsigned int h_id, int active_only)
+{
+	return lookup_dlg(h_entry, h_id, active_only);
+}
+
+
 struct dlg_cell *get_dlg_by_dialog_id(str *dialog_id)
 {
 	struct dlg_cell *dlg = NULL;
@@ -935,7 +967,7 @@ struct dlg_cell *get_dlg_by_dialog_id(str *dialog_id)
 		/* we might have a dialog did */
 		LM_DBG("ID: %*s (h_entry %u h_id %u)\n",
 				dialog_id->len, dialog_id->s, h_entry, h_id);
-		dlg = lookup_dlg(h_entry, h_id);
+		dlg = lookup_dlg(h_entry, h_id, 1);
 	}
 	if (!dlg) {
 		/* the ID is not a number, so let's consider
@@ -1312,7 +1344,7 @@ void next_state_dlg(struct dlg_cell *dlg, int event, int dir, int *old_state,
 
 
 /**************************** MI functions ******************************/
-static char *dlg_val_buf;
+static str dlg_val_buf;
 static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 									struct dlg_cell *dlg, int with_context)
 {
@@ -1327,6 +1359,7 @@ static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 	mi_item_t *callees_arr, *values_arr, *profiles_arr;
 	mi_item_t *context_obj, *callee_item, *values_item, *profiles_item;
 	str *did = dlg_get_did(dlg);
+	str flag_list;
 
 	if (add_mi_string(dialog_obj, MI_SSTR("ID"), did->s, did->len) < 0)
 		goto error;
@@ -1336,7 +1369,10 @@ static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 
 	if (add_mi_number(dialog_obj, MI_SSTR("state"), dlg->state) < 0)
 		goto error;
-	if (add_mi_number(dialog_obj, MI_SSTR("user_flags"), dlg->user_flags) < 0)
+
+	flag_list = bitmask_to_flag_list(FLAG_TYPE_DIALOG, dlg->user_flags);
+	if (add_mi_string(dialog_obj, MI_SSTR("user_flags"),
+		flag_list.s, flag_list.len) < 0)
 		goto error;
 
 	_ts = (time_t)dlg->start_ts;
@@ -1463,39 +1499,47 @@ static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 
 			/* print dlg values -> iterate the list */
 			for( dv=dlg->vals ; dv ; dv=dv->next) {
-				/* escape non-printable chars */
-				p = pkg_realloc(dlg_val_buf, 4 * dv->val.len + 1);
-				if (!p) {
-					LM_ERR("not enough mem to allocate: %d\n", dv->val.len);
-					continue;
-				}
-				for (i = 0, j = 0; i < dv->val.len; i++) {
-					if (dv->val.s[i] < 0x20 || dv->val.s[i] >= 0x7F) {
-						p[j++] = '\\';
-						switch ((unsigned char)dv->val.s[i]) {
-						case 0x8: p[j++] = 'b'; break;
-						case 0x9: p[j++] = 't'; break;
-						case 0xA: p[j++] = 'n'; break;
-						case 0xC: p[j++] = 'f'; break;
-						case 0xD: p[j++] = 'r'; break;
-						default:
-							p[j++] = 'x';
-							j += snprintf(&p[j], 3, "%02x",
-									(unsigned char)dv->val.s[i]);
-							break;
-						}
-					} else {
-						p[j++] = dv->val.s[i];
+				if (dv->type == DLG_VAL_TYPE_STR) {
+					/* escape non-printable chars */
+					if (pkg_str_extend(&dlg_val_buf, 4 * dv->val.s.len + 1) != 0) {
+						LM_ERR("not enough mem to allocate: %d\n", 4 * dv->val.s.len + 1);
+						continue;
 					}
+
+					p = dlg_val_buf.s;
+					for (i = 0, j = 0; i < dv->val.s.len; i++) {
+						if (dv->val.s.s[i] < 0x20 || dv->val.s.s[i] >= 0x7F) {
+							p[j++] = '\\';
+							switch ((unsigned char)dv->val.s.s[i]) {
+							case 0x8: p[j++] = 'b'; break;
+							case 0x9: p[j++] = 't'; break;
+							case 0xA: p[j++] = 'n'; break;
+							case 0xC: p[j++] = 'f'; break;
+							case 0xD: p[j++] = 'r'; break;
+							default:
+								p[j++] = 'x';
+								j += snprintf(&p[j], 3, "%02x",
+										(unsigned char)dv->val.s.s[i]);
+								break;
+							}
+						} else {
+							p[j++] = dv->val.s.s[i];
+						}
+					}
+
+					values_item = add_mi_object(values_arr, NULL, 0);
+					if (!values_item)
+						goto error;
+					if (add_mi_string(values_item,dv->name.s,dv->name.len,p,j) < 0)
+						goto error;
+				} else {
+					values_item = add_mi_object(values_arr, NULL, 0);
+					if (!values_item)
+						goto error;
+					if (add_mi_number(values_item,dv->name.s,dv->name.len,
+						dv->val.n) < 0)
+						goto error;
 				}
-
-				values_item = add_mi_object(values_arr, NULL, 0);
-				if (!values_item)
-					goto error;
-				if (add_mi_string(values_item,dv->name.s,dv->name.len,p,j) < 0)
-					goto error;
-
-				dlg_val_buf = p;
 			}
 		}
 
@@ -1517,7 +1561,7 @@ static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 
 		/* print external context info */
 		run_dlg_callbacks(DLGCB_MI_CONTEXT, dlg, NULL,
-			DLG_DIR_NONE, (void *)context_obj, 0, 1);
+			DLG_DIR_NONE, -1, (void *)context_obj, 0, 1);
 	}
 
 	return 0;
@@ -1743,6 +1787,7 @@ mi_response_t *mi_push_dlg_var(const mi_params_t *params,
 	int shtag_state = 1, db_update = 0;
 	mi_item_t *did_param_arr;
 	int i, no_dids;
+	int_str isval;
 
 	if ( d_table == NULL)
 		goto not_found;
@@ -1785,7 +1830,8 @@ mi_response_t *mi_push_dlg_var(const mi_params_t *params,
 			}
 		}
 
-		if (store_dlg_value( dlg, &dlg_var_name, &dlg_var_value)!=0) {
+		isval.s = dlg_var_value;
+		if (store_dlg_value( dlg, &dlg_var_name, &isval, DLG_VAL_TYPE_STR)!=0) {
 			LM_ERR("failed to store dialog values <%.*s>:<%.*s>\n",
 			dlg_var_name.len,dlg_var_name.s,
 			dlg_var_value.len,dlg_var_value.s);

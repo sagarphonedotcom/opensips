@@ -69,6 +69,9 @@
 #define DLG_FLAG_SELF_EXTENDED_TIMEOUT		(1<<18)
 #define DLG_FLAG_SYNCED                     (1<<19)
 
+#define dlg_has_options_pinging(dlg) \
+	(dlg->flags & DLG_FLAG_PING_CALLER || \
+	 dlg->flags & DLG_FLAG_PING_CALLEE)
 #define dlg_has_reinvite_pinging(dlg) \
 	(dlg->flags & DLG_FLAG_REINVITE_PING_CALLER || \
 	 dlg->flags & DLG_FLAG_REINVITE_PING_CALLEE)
@@ -80,6 +83,11 @@
 #define DLG_DIR_DOWNSTREAM     1
 #define DLG_DIR_UPSTREAM       2
 
+struct dlg_leg_cseq_map {
+	struct dlg_cell *dlg;
+	unsigned int msg, gen, leg;
+	struct dlg_leg_cseq_map *next;
+};
 
 struct dlg_leg {
 	int id;
@@ -99,7 +107,7 @@ struct dlg_leg {
 	str route_uris[64];
 	int nr_uris;
 	unsigned int last_gen_cseq; /* FIXME - think this can be atomic_t to avoid locking */
-	unsigned int last_inv_gen_cseq; /* used when translating ACKs */
+	struct dlg_leg_cseq_map *cseq_maps; /* used when translating ACKs */
 	char reply_received;
 	char reinvite_confirmed;
 	struct socket_info *bind_addr;
@@ -144,7 +152,10 @@ struct dlg_cell
 	unsigned int         initial_t_hash_index;
 	unsigned int         initial_t_label;
 	unsigned int         replicated; /* indicates if the dialog is replicated */
+	unsigned int         del_delay; /* if any custom delay should be done
+	                                 * when deleting this dialog */
 	struct dlg_tl        tl;
+	struct dlg_tl        del_tl;
 	struct dlg_ping_list *pl;
 	struct dlg_ping_list *reinvite_pl;
 	str                  terminate_reason;
@@ -158,9 +169,9 @@ struct dlg_cell
 	struct dlg_val       *vals;
 	str                  shtag;
 
-	int                  rt_on_answer;
-	int                  rt_on_timeout;
-	int                  rt_on_hangup;
+	struct script_route_ref  *rt_on_answer;
+	struct script_route_ref  *rt_on_timeout;
+	struct script_route_ref  *rt_on_hangup;
 
 #ifdef DBG_DIALOG
 	struct struct_hist   *hist;
@@ -320,8 +331,17 @@ void destroy_dlg(struct dlg_cell *dlg);
 			abort(); \
 		}\
 		if ((_dlg)->ref<=0) { \
-			unlink_unsafe_dlg( _d_entry, _dlg);\
-			destroy_dlg(_dlg);\
+			/* dlg good to be destried, but be sure it went first
+			 * via the delete timer */ \
+			if ((dlg_del_delay==0 && (_dlg)->del_delay==0) ||    \
+			insert_attempt_dlg_del_timer(&_dlg->del_tl,        \
+			(_dlg)->del_delay?(_dlg)->del_delay:dlg_del_delay)==-2) {\
+				/* no delay on del or not in del timer anymore -> destroy */ \
+				LM_DBG("Destroying dialog %p\n",_dlg); \
+				unlink_unsafe_dlg( _d_entry, _dlg);\
+				destroy_dlg(_dlg);\
+			} /* else, either still in timer (-1), either
+			   * inserted now in del timer (0) -> nothing to do*/ \
 		}\
 	}while(0)
 
@@ -389,20 +409,24 @@ int dlg_update_leg_info(int leg_idx, struct dlg_cell *dlg, str* tag, str *rr,
 		str *mangled_from,str *mangled_to,str *in_sdp, str *out_sdp);
 
 int dlg_update_cseq(struct dlg_cell *dlg, unsigned int leg, str *cseq,
-						int field_type);
+		int field_type);
 
-int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,str *rr, str *contact);
+int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,str *rr,
+		str *contact);
 
-struct dlg_cell* lookup_dlg( unsigned int h_entry, unsigned int h_id);
+struct dlg_cell* lookup_dlg( unsigned int h_entry, unsigned int h_id,
+		int active_only);
 
 struct dlg_cell* get_dlg(str *callid, str *ftag, str *ttag,
 		unsigned int *dir, unsigned int *dst_leg);
 
-struct dlg_cell* get_dlg_by_val(str *attr, str *val);
+struct dlg_cell* get_dlg_by_val(struct sip_msg *msg, str *attr, pv_spec_t *val);
 
 struct dlg_cell* get_dlg_by_callid(const str *callid, int active_only);
 
 struct dlg_cell* get_dlg_by_did(str *did, int active_only);
+
+struct dlg_cell* get_dlg_by_ids(unsigned int h_entry, unsigned int h_id, int active_only);
 
 struct dlg_cell *get_dlg_by_dialog_id(str *dialog_id);
 

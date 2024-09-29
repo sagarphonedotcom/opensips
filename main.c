@@ -131,6 +131,7 @@
 #include "ut.h"
 #include "serialize.h"
 #include "statistics.h"
+#include "status_report.h"
 #include "core_stats.h"
 #include "pvar.h"
 #include "signals.h"
@@ -146,6 +147,7 @@
 #include "net/trans.h"
 
 #include "test/unit_tests.h"
+#include "lib/dbg/profiling.h"
 
 #include "ssl_tweaks.h"
 
@@ -170,6 +172,11 @@ static char* flags=OPENSIPS_COMPILE_FLAGS;
 static int user_id = 0;
 static int group_id = 0;
 
+const struct scm_version core_scm_ver = {
+	.type = VERSIONTYPE,
+	.rev = THISREVISION
+};
+
 /**
  * Print compile-time constants
  */
@@ -183,9 +190,7 @@ static void print_ct_constants(void)
 		MAX_RECV_BUFFER_SIZE, MAX_LISTEN, MAX_URI_SIZE,
 		BUF_SIZE );
 	printf("poll method support: %s.\n", poll_support);
-#ifdef VERSIONTYPE
-	printf("%s revision: %s\n", VERSIONTYPE, THISREVISION);
-#endif
+	printf("%s revision: %s\n", core_scm_ver.type, core_scm_ver.rev);
 }
 
 
@@ -200,8 +205,13 @@ static int main_loop(void)
 	int* startup_done = NULL;
 	utime_t last_check = 0;
 	int rc;
+	static struct internal_fork_handler profiling_handler = {
+		.desc = "_ProfilerStart_child()",
+		.on_child_init = _ProfilerStart_child,
+	};
 
 	chd_rank=0;
+	register_fork_handler(&profiling_handler);
 
 	if (start_module_procs()!=0) {
 		LM_ERR("failed to fork module processes\n");
@@ -256,12 +266,13 @@ static int main_loop(void)
 		shm_free(startup_done);
 	}
 
-	set_osips_state( STATE_RUNNING );
+	sr_set_core_status( STATE_RUNNING, MI_SSTR("running"));
+	sr_add_core_report( MI_SSTR("initialization completed, ready now") );
 
 	/* main process left */
 	is_main=1;
 	set_proc_attrs("attendant");
-	pt[process_no].flags |= OSS_PROC_NO_IPC|OSS_PROC_NO_LOAD;
+	pt[process_no].flags |= OSS_PROC_IS_RUNNING|OSS_PROC_NO_IPC|OSS_PROC_NO_LOAD;
 
 	if (testing_framework) {
 		if (init_child(1) < 0) {
@@ -287,6 +298,16 @@ static int main_loop(void)
 		 * processes, so we will need to pass write-end to the new children;
 		 * of course, we will need the read-end, here in the main proc */
 		last_check = get_uticks();
+	}
+
+	if (set_log_event_cons_cfg_state() < 0) {
+		LM_ERR("Failed to set the config state for event consumer\n");
+		goto error;
+	}
+
+	if (_ProfilerStart(0, "attendant") != 0) {
+		LM_ERR("failed to start profiling\n");
+		goto error;
 	}
 
 	for(;;){
@@ -325,8 +346,6 @@ error:
  */
 int main(int argc, char** argv)
 {
-	/* configure by default logging to syslog */
-	int cfg_log_stderr = 1;
 	int c,r;
 	char *tmp;
 	int tmp_len;
@@ -337,6 +356,7 @@ int main(int argc, char** argv)
 	int ret;
 	unsigned int seed;
 	int rfd;
+	int procs_no;
 
 	/*init*/
 	ret=-1;
@@ -425,7 +445,7 @@ int main(int argc, char** argv)
 	if (init_pkg_mallocs()==-1)
 		goto error00;
 
-	if ( (sroutes=new_sroutes_holder())==NULL )
+	if ( (sroutes=new_sroutes_holder(0))==NULL )
 		goto error00;
 
 	/* we want to be sure that from now on, all the floating numbers are 
@@ -447,7 +467,6 @@ int main(int argc, char** argv)
 					if (config_check==3)
 						break;
 					config_check |= 1;
-					cfg_log_stderr=1; /* force stderr logging */
 					break;
 			case 'm':
 			case 'M':
@@ -502,8 +521,9 @@ int main(int argc, char** argv)
 					no_daemon_mode=1;
 					break;
 			case 'E':
-					cfg_log_stderr=1;
-					break;
+					LM_ERR("-E option deprecated since 3.4, set \"stderror_enabled=yes\" "
+					    "at the script level instead\n");
+					goto error00;
 			case 'N':
 					tcp_workers_no=strtol(optarg, &tmp, 10);
 					if ((tmp==0) ||(*tmp)){
@@ -583,8 +603,6 @@ int main(int argc, char** argv)
 		}
 	}
 
-	log_stderr = cfg_log_stderr;
-
 	/* seed the prng, try to use /dev/urandom if possible */
 	/* no debugging information is logged, because the standard
 	   log level prior the config file parsing is L_NOTICE */
@@ -632,7 +650,13 @@ try_again:
 		goto error;
 	}
 
-	set_osips_state( STATE_STARTING );
+	if (init_status_report() < 0) {
+		LM_ERR("failed to initialize status-report support\n");
+		goto error;
+	}
+
+	sr_set_core_status( STATE_INITIALIZING, MI_SSTR("initializing"));
+	sr_add_core_report( MI_SSTR("initializing") );
 
 	if ((!testing_framework || strcmp(testing_module, "core"))
 	        && parse_opensips_cfg(cfg_file, preproc, NULL) < 0) {
@@ -640,8 +664,19 @@ try_again:
 		goto error00;
 	}
 
+	if (shm_memlog_size && init_dbg_shm_mallocs()==-1)
+		goto error;
+
 	/* shm statistics, module stat groups, memory warming */
-	init_shm_post_yyparse();
+	if (init_shm_post_yyparse() != 0) {
+		LM_ERR("failed to init SHM memory\n");
+		return ret;
+	}
+
+	if (init_log_cons_shm_table() < 0) {
+		LM_ERR("Failed to initialize shm log consumers table\n");
+		goto error;
+	}
 
 	if (config_check>1 && check_rls()!=0) {
 		LM_ERR("bad function call in config file\n");
@@ -725,9 +760,15 @@ try_again:
 			LM_NOTICE("disabling daemon mode (found enabled)\n");
 			no_daemon_mode = 1;
 		}
-		if (log_stderr==0) {
+		if (stderr_enabled==0) {
 			LM_NOTICE("enabling logging to standard error (found disabled)\n");
-			log_stderr = 1;
+			stderr_enabled = 1;
+			set_log_consumer_mute_state(&str_init(STDERR_CONSUMER_NAME), 0);
+		}
+		if (syslog_enabled) {
+			LM_NOTICE("disabling logging to syslog (found enabled)\n");
+			syslog_enabled = 0;
+			set_log_consumer_mute_state(&str_init(SYSLOG_CONSUMER_NAME), 1);
 		}
 		if (*log_level < L_DBG && (!testing_framework ||
 		                           !strcmp(testing_module, "core"))) {
@@ -747,10 +788,11 @@ try_again:
 			}
 		}
 		if (tcp_count_processes(NULL)!=0) {
-			if (tcp_workers_no!=2) {
-				LM_NOTICE("setting TCP children to 2 (found %d)\n",
-					tcp_workers_no);
-				tcp_workers_no = 2;
+			procs_no = (tcp_workers_max_no>=2) ? 2 : tcp_workers_max_no;
+			if (tcp_workers_no != procs_no) {
+				LM_NOTICE("setting TCP children to %d (found %d)\n",
+					procs_no, tcp_workers_no);
+				tcp_workers_no = procs_no;
 			}
 		}
 
@@ -799,6 +841,9 @@ try_again:
 		LM_CRIT("could not initialize timer, exiting...\n");
 		goto error;
 	}
+
+	if (shm_memlog_size)
+		shm_mem_enable_dbg();
 
 	/* init IPC */
 	if (init_ipc()<0){
@@ -898,6 +943,11 @@ try_again:
 		goto error;
 	}
 
+	if (init_log_event_cons() < 0) {
+		LM_ERR("Failed to initialize log event consumer\n");
+		goto error;
+	}
+
 	if (trans_init_all_listeners()<0) {
 		LM_ERR("failed to init all SIP listeners, aborting\n");
 		goto error;
@@ -922,5 +972,6 @@ error:
 	cleanup(0);
 error00:
 	LM_NOTICE("Exiting....\n");
+	_ProfilerStop();
 	return ret;
 }

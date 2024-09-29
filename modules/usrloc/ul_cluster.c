@@ -59,7 +59,7 @@ int ul_init_cluster(void)
 	}
 
 	if (rr_persist == RRP_SYNC_FROM_CLUSTER &&
-	    clusterer_api.request_sync(&contact_repl_cap, location_cluster) < 0)
+	    clusterer_api.request_sync(&contact_repl_cap, location_cluster, 0) < 0)
 		LM_ERR("Sync request failed\n");
 
 	return 0;
@@ -500,12 +500,12 @@ out_err:
 static int receive_ucontact_insert(bin_packet_t *packet)
 {
 	static ucontact_info_t ci;
-	static str d, aor, host, contact_str, callid,
+	static str d, aor, contact_str, callid,
 		user_agent, path, attr, st, sock, kv_str;
 	udomain_t *domain;
 	urecord_t *record;
 	ucontact_t *contact, *ct;
-	int rc, port, proto, sl;
+	int rc, sl;
 	unsigned short _, clabel;
 	unsigned int rlabel;
 	struct ct_match cmatch = {CT_MATCH_NONE, NULL};
@@ -554,14 +554,7 @@ static int receive_ucontact_insert(bin_packet_t *packet)
 	bin_pop_str(packet, &sock);
 
 	if (sock.s && sock.s[0]) {
-		if (parse_phostport(sock.s, sock.len, &host.s, &host.len,
-			&port, &proto) != 0) {
-			LM_ERR("bad socket <%.*s>\n", sock.len, sock.s);
-			goto error;
-		}
-
-		ci.sock = grep_internal_sock_info(&host, (unsigned short) port,
-			(unsigned short) proto);
+		ci.sock = parse_sock_info(&sock);
 		if (!ci.sock)
 			LM_DBG("non-local socket <%.*s>\n", sock.len, sock.s);
 	} else {
@@ -672,12 +665,12 @@ error:
 static int receive_ucontact_update(bin_packet_t *packet)
 {
 	static ucontact_info_t ci;
-	static str d, aor, host, contact_str, callid,
+	static str d, aor, contact_str, callid,
 		user_agent, path, attr, st, kv_str, sock;
 	udomain_t *domain;
 	urecord_t *record;
 	ucontact_t *contact;
-	int port, proto, rc, sl;
+	int rc, sl;
 	unsigned short _, clabel;
 	unsigned int rlabel;
 	struct ct_match cmatch = {CT_MATCH_NONE, NULL};
@@ -723,14 +716,7 @@ static int receive_ucontact_update(bin_packet_t *packet)
 	bin_pop_str(packet, &sock);
 
 	if (sock.s && sock.s[0]) {
-		if (parse_phostport(sock.s, sock.len, &host.s, &host.len,
-			&port, &proto) != 0) {
-			LM_ERR("bad socket <%.*s>\n", sock.len, sock.s);
-			goto error;
-		}
-
-		ci.sock = grep_internal_sock_info(&host, (unsigned short) port,
-			(unsigned short) proto);
+		ci.sock = parse_sock_info(&sock);
 		if (!ci.sock)
 			LM_DBG("non-local socket <%.*s>\n", sock.len, sock.s);
 	} else {
@@ -922,65 +908,62 @@ static int receive_sync_packet(bin_packet_t *packet)
 	return rc;
 }
 
-void receive_binary_packets(bin_packet_t *packet)
+void receive_binary_packets(bin_packet_t *pkt)
 {
 	int rc;
-	bin_packet_t *pkt;
 
-	for (pkt = packet; pkt; pkt = pkt->next) {
-		/* Supported smooth BIN transitions:
-			UL_BIN_V2 -> UL_BIN_V3: the "cmatch" has been added
-							(assume: CT_MATCH_CONTACT_CALLID if not present)
-		*/
-		short ver = get_bin_pkg_version(pkt);
+	/* Supported smooth BIN transitions:
+		UL_BIN_V2 -> UL_BIN_V3: the "cmatch" has been added
+						(assume: CT_MATCH_CONTACT_CALLID if not present)
+	*/
+	short ver = get_bin_pkg_version(pkt);
 
-		LM_DBG("received a binary packet [%d]!\n", pkt->type);
+	LM_DBG("received a binary packet [%d]!\n", pkt->type);
 
-		switch (pkt->type) {
-		case REPL_URECORD_INSERT:
-			if (ver != UL_BIN_V2)
-				ensure_bin_version(pkt, UL_BIN_VERSION);
-			rc = receive_urecord_insert(pkt);
-			break;
+	switch (pkt->type) {
+	case REPL_URECORD_INSERT:
+		if (ver != UL_BIN_V2)
+			ensure_bin_version(pkt, UL_BIN_VERSION);
+		rc = receive_urecord_insert(pkt);
+		break;
 
-		case REPL_URECORD_DELETE:
-			if (ver != UL_BIN_V2)
-				ensure_bin_version(pkt, UL_BIN_VERSION);
-			rc = receive_urecord_delete(pkt);
-			break;
+	case REPL_URECORD_DELETE:
+		if (ver != UL_BIN_V2)
+			ensure_bin_version(pkt, UL_BIN_VERSION);
+		rc = receive_urecord_delete(pkt);
+		break;
 
-		case REPL_UCONTACT_INSERT:
-			if (ver != UL_BIN_V2)
-				ensure_bin_version(pkt, UL_BIN_VERSION);
-			rc = receive_ucontact_insert(pkt);
-			break;
+	case REPL_UCONTACT_INSERT:
+		if (ver != UL_BIN_V2)
+			ensure_bin_version(pkt, UL_BIN_VERSION);
+		rc = receive_ucontact_insert(pkt);
+		break;
 
-		case REPL_UCONTACT_UPDATE:
-			if (ver != UL_BIN_V2)
-				ensure_bin_version(pkt, UL_BIN_VERSION);
-			rc = receive_ucontact_update(pkt);
-			break;
+	case REPL_UCONTACT_UPDATE:
+		if (ver != UL_BIN_V2)
+			ensure_bin_version(pkt, UL_BIN_VERSION);
+		rc = receive_ucontact_update(pkt);
+		break;
 
-		case REPL_UCONTACT_DELETE:
-			if (ver != UL_BIN_V2)
-				ensure_bin_version(pkt, UL_BIN_VERSION);
-			rc = receive_ucontact_delete(pkt);
-			break;
+	case REPL_UCONTACT_DELETE:
+		if (ver != UL_BIN_V2)
+			ensure_bin_version(pkt, UL_BIN_VERSION);
+		rc = receive_ucontact_delete(pkt);
+		break;
 
-		case SYNC_PACKET_TYPE:
-			if (ver != UL_BIN_V2)
-				_ensure_bin_version(pkt, UL_BIN_VERSION, "usrloc sync packet");
-			rc = receive_sync_packet(pkt);
-			break;
+	case SYNC_PACKET_TYPE:
+		if (ver != UL_BIN_V2)
+			_ensure_bin_version(pkt, UL_BIN_VERSION, "usrloc sync packet");
+		rc = receive_sync_packet(pkt);
+		break;
 
-		default:
-			rc = -1;
-			LM_ERR("invalid usrloc binary packet type: %d\n", pkt->type);
-		}
-
-		if (rc != 0)
-			LM_ERR("failed to process binary packet!\n");
+	default:
+		rc = -1;
+		LM_ERR("invalid usrloc binary packet type: %d\n", pkt->type);
 	}
+
+	if (rc != 0)
+		LM_ERR("failed to process binary packet!\n");
 }
 
 static int receive_sync_request(int node_id)

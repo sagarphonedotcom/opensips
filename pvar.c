@@ -272,13 +272,13 @@ static int pv_get_return_code(struct sip_msg *msg, pv_param_t *param,
 	return pv_get_sintval(msg, param, res, return_code);
 }
 
-static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
+static int pv_get_route(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
 	static str rn_buf;
 
 	str s;
-	int i, idx, idx_flags, len, rlen, has_name;
+	int i, idx, idx_flags, len, rlen, has_name, route_stack_size_ctx;
 
 	if (pv_get_spec_index(msg, param, &idx, &idx_flags) != 0) {
 		LM_ERR("invalid index\n");
@@ -290,13 +290,13 @@ static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
 		if (!has_name)
 			goto unnamed_route;
 
-		len = strlen(route_stack[0]);
+		len = strlen(route_stack[route_stack_start]);
 		if (pkg_str_extend(&rn_buf, s.len + 2 + len + 1) != 0) {
 			LM_ERR("oom\n");
 			return pv_get_null(msg, param, res);
 		}
 
-		len = sprintf(rn_buf.s, "%.*s[%s]", s.len, s.s, route_stack[idx]);
+		len = sprintf(rn_buf.s, "%.*s[%s]", s.len, s.s, route_stack[route_stack_start]);
 		goto print_remaining;
 
 	unnamed_route:
@@ -310,7 +310,7 @@ static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
 	print_remaining:
 		s = str_route;
 
-		for (i = 1; i < route_stack_size; i++) {
+		for (i = route_stack_start+1; i < route_stack_size; i++) {
 			if (!route_stack[i]) {
 				if (pkg_str_extend(&rn_buf, len + 3 + s.len + 1) != 0) {
 					LM_ERR("oom\n");
@@ -346,15 +346,17 @@ static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
 		return pv_get_strval(msg, param, res, &s);
 	}
 
+	route_stack_size_ctx = route_stack_size - route_stack_start;
+
 	if (idx < 0)
-		idx += route_stack_size;
+		idx += route_stack_size_ctx;
 
 	/* index out of bounds -- play nice and return NULL */
-	if (idx > route_stack_size - 1 || idx < 0)
+	if (idx > route_stack_size_ctx - 1 || idx < 0)
 		return pv_get_null(msg, param, res);
 
 	/* reverse the index, since we index the route stack backwards */
-	idx = route_stack_size - idx - 1;
+	idx = route_stack_size_ctx - idx - 1;
 
 	if (idx == 0) {
 		get_top_route_type(&s, &has_name);
@@ -363,19 +365,19 @@ static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
 
 	} else {
 		s = str_route;
-		if (!route_stack[idx])
+		if (!route_stack[route_stack_start + idx])
 			goto out_ok;
 	}
 
-	len = strlen(route_stack[idx]);
+	len = strlen(route_stack[route_stack_start + idx]);
 
-	if (route_stack[idx][0] != '!') {
+	if (route_stack[route_stack_start + idx][0] != '!') {
 		if (pkg_str_extend(&rn_buf, s.len + 2 + len + 1) != 0) {
 			LM_ERR("oom\n");
 			return pv_get_null(msg, param, res);
 		}
 
-		s.len = sprintf(rn_buf.s, "%.*s[%s]", s.len, s.s, route_stack[idx]);
+		s.len = sprintf(rn_buf.s, "%.*s[%s]", s.len, s.s, route_stack[route_stack_start + idx]);
 		s.s = rn_buf.s;
 	} else {
 		/* the "!" marker tells us to print that route name as-is */
@@ -384,14 +386,80 @@ static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
 			return pv_get_null(msg, param, res);
 		}
 
-		s.len = sprintf(rn_buf.s, "%s", route_stack[idx] + 1);
+		s.len = sprintf(rn_buf.s, "%s", route_stack[route_stack_start + idx] + 1);
 		s.s = rn_buf.s;
 	}
-
 
 out_ok:
 	return pv_get_strval(msg, param, res, &s);
 }
+
+
+static int pv_get_route_name(struct sip_msg *msg, pv_param_t *param,
+		pv_value_t *res)
+{
+	str rn;
+	int idx, idx_flags, route_stack_size_ctx;
+
+	if (pv_get_spec_index(msg, param, &idx, &idx_flags) != 0) {
+		LM_ERR("invalid index\n");
+		return -1;
+	}
+
+	if (idx_flags == PV_IDX_ALL) {
+		LM_ERR("unsupported index: [*]\n");
+		return -1;
+	}
+
+	route_stack_size_ctx = route_stack_size - route_stack_start;
+
+	if (idx < 0)
+		idx += route_stack_size_ctx;
+
+	/* index out of bounds -- play nice and return NULL */
+	if (idx > route_stack_size_ctx - 1 || idx < 0)
+		return pv_get_null(msg, param, res);
+
+	/* reverse the index, since we index the route stack backwards */
+	idx = route_stack_size_ctx - idx - 1;
+
+	get_route_name(idx, &rn);
+	return pv_get_strval(msg, param, res, &rn);
+}
+
+
+static int pv_get_route_type(struct sip_msg *msg, pv_param_t *param,
+		pv_value_t *res)
+{
+	str rt;
+	int idx, idx_flags, route_stack_size_ctx;
+
+	if (pv_get_spec_index(msg, param, &idx, &idx_flags) != 0) {
+		LM_ERR("invalid index\n");
+		return -1;
+	}
+
+	if (idx_flags == PV_IDX_ALL) {
+		LM_ERR("unsupported index: [*]\n");
+		return -1;
+	}
+
+	route_stack_size_ctx = route_stack_size - route_stack_start;
+
+	if (idx < 0)
+		idx += route_stack_size_ctx;
+
+	/* index out of bounds -- play nice and return NULL */
+	if (idx > route_stack_size_ctx - 1 || idx < 0)
+		return pv_get_null(msg, param, res);
+
+	/* reverse the index, since we index the route stack backwards */
+	idx = route_stack_size_ctx - idx - 1;
+
+	get_route_type(idx, &rt);
+	return pv_get_strval(msg, param, res, &rt);
+}
+
 
 static int pv_get_times(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
@@ -617,7 +685,7 @@ static int pv_get_xuri_attr(struct sip_msg *msg, struct sip_uri *parsed_uri,
 		if(parsed_uri->transport_val.s==NULL) {
 			get_uri_port(parsed_uri, &proto);
 			proto_s.s = protos[proto].name;
-			proto_s.len = strlen(proto_s.s);
+			proto_s.len = proto_s.s ? strlen(proto_s.s) : 0;
 			return pv_get_strintval(msg, param, res, &proto_s, (int)proto);
 		}
 		return pv_get_strintval(msg, param, res, &parsed_uri->transport_val,
@@ -1415,7 +1483,7 @@ static int pv_get_dsturi_attr(struct sip_msg *msg, pv_param_t *param,
 		if(uri.transport_val.s==NULL) {
 			get_uri_port(&uri, &proto);
 			proto_s.s = protos[proto].name;
-			proto_s.len = strlen(proto_s.s);
+			proto_s.len = proto_s.s ? strlen(proto_s.s) : 0;
 			return pv_get_strintval(msg, param, res, &proto_s, (int)proto);
 		}
 		return pv_get_strintval(msg, param, res, &uri.transport_val,
@@ -1573,7 +1641,6 @@ static int pv_parse_rb_name(pv_spec_p sp, const str *in)
 	return 0;
 }
 
-
 static int pv_get_msg_body(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
@@ -1630,9 +1697,16 @@ static int pv_get_msg_body(struct sip_msg *msg, pv_param_t *param,
 	if (idx<0) {
 		first_part_by_mime( &sbody->first, neg_index[1], mime );
 		neg_index[0] = neg_index[1];
+
+		if (neg_index[0]==NULL) {
+			LM_DBG("Body part not found for <%d>\n", mime);
+			return pv_get_null(msg, param, res);
+		}
+
 		/*distance=last_body_postition-searched_body_position*/
 		distance -= idx+1;
-		while (neg_index[1]->next) {
+		first_part_by_mime(neg_index[1]->next, neg_index[1], mime);
+		while (neg_index[1]) {
 			if (distance == 0) {
 				first_part_by_mime( neg_index[0]->next, neg_index[0], mime );
 			} else {
@@ -1946,8 +2020,6 @@ static inline int get_branch_field( int idx, pv_name_t *pvn, pv_value_t *res)
 static int pv_get_branch_fields(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
-	str uri;
-	qvalue_t q;
 	int idx;
 	int idxf;
 	char *p;
@@ -1974,10 +2046,12 @@ static int pv_get_branch_fields(struct sip_msg *msg, pv_param_t *param,
 		p = pv_local_buf;
 		idx = 0;
 
-		while ( (uri.s=get_branch(idx, &uri.len, &q, 0, 0, 0, 0))!=NULL ) {
+		while ( idx<get_nr_branches() ) {
+
+			get_branch_field( idx, &param->pvn, res);
 
 			if ( pv_local_buf + PV_LOCAL_BUF_SIZE <=
-			p + uri.len + PV_FIELD_DELIM_LEN ) {
+			p + res->rs.len + PV_FIELD_DELIM_LEN ) {
 				LM_ERR("local buffer length exceeded\n");
 				return pv_get_null(msg, param, res);
 			}
@@ -1987,8 +2061,8 @@ static int pv_get_branch_fields(struct sip_msg *msg, pv_param_t *param,
 				p += PV_FIELD_DELIM_LEN;
 			}
 
-			memcpy(p, uri.s, uri.len);
-			p += uri.len;
+			memcpy(p, res->rs.s, res->rs.len);
+			p += res->rs.len;
 			idx++;
 		}
 
@@ -2761,11 +2835,6 @@ static int pv_set_avp(struct sip_msg* msg, pv_param_t *param,
 			destroy_avps(name_type, avp_name, 1);
 		else
 		{
-			if(idx < 0)
-			{
-				LM_ERR("Index with negative value\n");
-				return -1;
-			}
 			destroy_index_avp(name_type, avp_name, idx);
 		}
 		return 0;
@@ -3164,7 +3233,7 @@ static int pv_set_branch_fields(struct sip_msg* msg, pv_param_t *param,
 				return -1;
 			}
 			flags = (!val||val->flags&PV_VAL_NULL)?
-				0 : flag_list_to_bitmask(str2const(&val->rs), FLAG_TYPE_BRANCH, FLAG_DELIM);
+				0 : flag_list_to_bitmask(str2const(&val->rs), FLAG_TYPE_BRANCH, FLAG_DELIM, 0);
 			return update_branch( idx, NULL, NULL,
 				NULL, NULL, &flags, NULL);
 		case BR_SOCKET_ID: /* set SOCKET */
@@ -3175,16 +3244,7 @@ static int pv_set_branch_fields(struct sip_msg* msg, pv_param_t *param,
 			if (!val || val->flags&PV_VAL_NULL) {
 				si = NULL;
 			} else {
-				str host;
-				int port, proto;
-				if (parse_phostport(val->rs.s, val->rs.len, &host.s, &host.len,
-				&port, &proto) < 0) {
-					LM_ERR("invalid socket specification\n");
-					return -1;
-				}
-				set_sip_defaults( port, proto);
-				si = grep_internal_sock_info(&host, (unsigned short)port,
-					(unsigned short)proto);
+				si = parse_sock_info(&val->rs);
 				if (si==NULL)
 					return -1;
 			}
@@ -3200,8 +3260,6 @@ static int pv_set_force_sock(struct sip_msg* msg, pv_param_t *param,
 		int op, pv_value_t *val)
 {
 	struct socket_info *si;
-	int port, proto;
-	str host;
 
 	if(msg==NULL || param==NULL)
 	{
@@ -3221,14 +3279,7 @@ static int pv_set_force_sock(struct sip_msg* msg, pv_param_t *param,
 		goto error;
 	}
 
-	if (parse_phostport(val->rs.s, val->rs.len, &host.s, &host.len, &port, &proto) < 0)
-	{
-		LM_ERR("invalid socket specification\n");
-		goto error;
-	}
-	set_sip_defaults( port, proto);
-	si = grep_internal_sock_info(&host, (unsigned short)port,
-		(unsigned short)proto);
+	si = parse_sock_info(&val->rs);
 	if (si!=NULL)
 	{
 		msg->force_send_socket = si;
@@ -3804,7 +3855,10 @@ static int branch_flag_get(struct sip_msg *msg,  pv_param_t *param, pv_value_t *
 /**
  * the table with core pseudo-variables
  */
-static const pv_export_t _pv_names_table[] = {
+#ifndef FUZZ_BUILD
+static
+#endif
+const pv_export_t _pv_names_table[] = {
 	{str_init("avp"), PVT_AVP, pv_get_avp, pv_set_avp,
 		pv_parse_avp_name, pv_parse_avp_index, 0, 0},
 	{str_init("hdr"), PVT_HDR, pv_get_hdr, 0, pv_parse_hdr_name,
@@ -4040,7 +4094,13 @@ static const pv_export_t _pv_names_table[] = {
 		PVT_METHOD, pv_get_method, 0,
 		0, 0, 0, 0},
 	{str_init("route"), /* */
+		PVT_ROUTE, pv_get_route, 0,
+		0, pv_parse_index, 0, 0},
+	{str_init("route.name"), /* */
 		PVT_ROUTE_NAME, pv_get_route_name, 0,
+		0, pv_parse_index, 0, 0},
+	{str_init("route.type"), /* */
+		PVT_ROUTE_TYPE, pv_get_route_type, 0,
 		0, pv_parse_index, 0, 0},
 	{str_init("rp"), /* */
 		PVT_RURI_PORT, pv_get_ruri_attr, pv_set_ruri_port,
@@ -4533,7 +4593,7 @@ error:
 int pv_parse_format(const str *in, pv_elem_p *el)
 {
 	char *p, *p0;
-	int n = 0;
+	/*int n = 0;*/
 	pv_elem_p e, e0;
 	str s;
 
@@ -4567,7 +4627,7 @@ int pv_parse_format(const str *in, pv_elem_p *el)
 			goto error;
 		}
 		memset(e, 0, sizeof(pv_elem_t));
-		n++;
+		/*n++;*/
 		if(*el == NULL)
 			*el = e;
 		if(e0)
@@ -4951,6 +5011,9 @@ int pv_elem_free_all(pv_elem_p log)
 	{
 		t = log;
 		log = log->next;
+
+		if (t->spec.trans)
+			free_transformation((trans_t *)t->spec.trans);
 		pkg_free(t);
 	}
 	return 0;
@@ -5078,7 +5141,7 @@ static int pv_init_extra_list(void)
 	return 0;
 }
 
-static int pv_add_extra(pv_export_t *e)
+static int pv_add_extra(const pv_export_t *e)
 {
 	char *p;
 	const str *in;
@@ -5154,7 +5217,7 @@ done:
 	return 0;
 }
 
-int register_pvars_mod(char *mod_name, pv_export_t *items)
+int register_pvars_mod(const char *mod_name, const pv_export_t *items)
 {
 	int ret;
 	int i;

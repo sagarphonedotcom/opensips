@@ -50,6 +50,7 @@
 #include "../../parser/sdp/sdp.h"
 #include "../../parser/contact/parse_contact.h"
 #include "../../parser/digest/digest.h"
+#include "../../msg_translator.h"
 #include "../../mod_fix.h"
 #include "../../trim.h"
 
@@ -82,6 +83,7 @@
 static int remove_hf(struct sip_msg* msg, int_str_t* hf);
 static int remove_hf_re(struct sip_msg* msg, regex_t* re);
 static int remove_hf_glob(struct sip_msg* msg, str* pattern);
+static int get_glob_headers_values(struct sip_msg* msg, str* pattern,pv_spec_t* names, pv_spec_t *vals);
 static int remove_hf_match_f(struct sip_msg* msg, void* pattern, int is_regex);
 static int is_present_hf(struct sip_msg* msg, void* _match_hf);
 static int append_to_reply_f(struct sip_msg* msg, str* key);
@@ -95,6 +97,7 @@ static int is_privacy_f(struct sip_msg *msg, void *privacy);
 static int remove_body_part_f(struct sip_msg *msg, void *type, void *revert);
 static int add_body_part_f(struct sip_msg *msg, str *body, str *mime,
                            str *extra_hdrs);
+static int get_updated_body_part_f(struct sip_msg *msg, int *type,pv_spec_t* out);
 static int is_audio_on_hold_f(struct sip_msg *msg);
 static int w_sip_validate(struct sip_msg *msg, void *flags, pv_spec_t* err_txt);
 
@@ -114,7 +117,7 @@ static int change_reply_status_f(struct sip_msg* msg, int* code, str* reason);
 
 static int mod_init(void);
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"append_to_reply",  (cmd_function)append_to_reply_f, {
 		{CMD_PARAM_STR, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ERROR_ROUTE},
@@ -184,6 +187,11 @@ static cmd_export_t cmds[]={
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
+	{"get_updated_body_part",    (cmd_function)get_updated_body_part_f, {
+		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_mime_type, 0},
+		{CMD_PARAM_VAR, 0, 0}, {0, 0, 0}},
+		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
+
 	{"codec_exists",	(cmd_function)codec_find, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0, 0, 0}},
@@ -238,11 +246,13 @@ static cmd_export_t cmds[]={
 		ONREPLY_ROUTE },
 
 	{"stream_exists",	(cmd_function)stream_find, {
-		{CMD_PARAM_REGEX, 0, 0}, {0, 0, 0}},
+		{CMD_PARAM_REGEX, 0, 0},
+		{CMD_PARAM_REGEX|CMD_PARAM_OPT, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{"stream_delete",	(cmd_function)stream_delete, {
-		{CMD_PARAM_REGEX, 0, 0}, {0, 0, 0}},
+		{CMD_PARAM_REGEX, 0, 0},
+		{CMD_PARAM_REGEX|CMD_PARAM_OPT, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{"list_hdr_has_option", (cmd_function)list_hdr_has_option, {
@@ -274,14 +284,20 @@ static cmd_export_t cmds[]={
 
 	{"ruri_del_param", (cmd_function)ruri_del_param, {
 		{CMD_PARAM_STR, 0, 0}, {0, 0, 0}},
-		REQUEST_ROUTE},
+		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{"ruri_tel2sip", (cmd_function)ruri_tel2sip, {{0, 0, 0}},
-		REQUEST_ROUTE},
+		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{"is_uri_user_e164", (cmd_function)is_uri_user_e164, {
 		{CMD_PARAM_STR, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|LOCAL_ROUTE},
+	{"get_glob_headers_values",   (cmd_function)get_glob_headers_values, {
+		{CMD_PARAM_STR, 0, 0},
+	        {CMD_PARAM_VAR, 0, 0},
+	        {CMD_PARAM_VAR, 0, 0},
+		{0, 0, 0}},
+		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{0,0,{{0,0,0}},0}
 };
@@ -853,14 +869,16 @@ static int has_body_f(struct sip_msg *msg, void *type)
 {
 	struct body_part * p;
 
-	if ( msg->content_length==NULL &&
-	(parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1||msg->content_length==NULL))
-		return -1;
+	if ( msg->content_length==NULL ) {
+		if (parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1)
+			return -1;
 
-	if (get_content_length (msg)==0) {
-		LM_DBG("content length is zero\n");
-		/* Nothing to see here, please move on. */
-		return -1;
+		if (msg->rcv.proto!=PROTO_UDP && (
+		(msg->content_length==NULL) || get_content_length (msg)==0 ) ) {
+			LM_DBG("no content length hdr or zero len\n");
+			/* Nothing to see here, please move on. */
+			return -1;
+		}
 	}
 
 	if( ( ((int)(long)type )>>16) == TYPE_MULTIPART )
@@ -952,6 +970,110 @@ static int add_body_part_f(struct sip_msg *msg, str *body, str *mime,
 
 	if (!add_body_part(msg, mime, extra_hdrs, body)) {
 		LM_ERR("failed to add new body part <%.*s>\n", mime->len, mime->s);
+		return -1;
+	}
+
+	return 1;
+}
+
+
+/*
+ *	Function to apply all pending changes over a body part and
+ *	return the result into a variable
+ * */
+static int get_updated_body_part_f(struct sip_msg *msg, int *type, pv_spec_t* res)
+{
+	static str out = {NULL, 0};
+	struct body_part *p, *it;
+	unsigned int out_offs, orig_offs, parts;
+	pv_value_t val;
+
+
+	if (parse_sip_body(msg)<0 || msg->body==NULL) {
+		LM_DBG("no body found\n");
+		return -1;
+	}
+
+
+	if (type) {
+
+		p = &msg->body->first;
+		while (p) {
+			if ( (p->flags&SIP_BODY_PART_FLAG_DELETED) == 0
+			&& p->mime == ((int)(long)type) )
+				break;
+
+			p = p->next;
+		}
+
+		if (p==NULL)
+			return -2;  /* not found */
+
+		/* found */
+
+		/* iterate again and mark all the other as DELETED */
+		for (it = &msg->body->first ; it ; it=it->next)
+			if (it!=p) {
+				if (it->flags&SIP_BODY_PART_FLAG_DELETED)
+					it->flags |= SIP_BODY_PART_FLAG_MARKED;
+				else
+					it->flags |= SIP_BODY_PART_FLAG_DELETED;
+			}
+
+		parts = msg->body->updated_part_count;
+		msg->body->updated_part_count = 1;
+
+		/* now the body is faked as having only one part,
+		 * so the body assembler will generate output only for it */
+	}
+
+
+	/* re-assemble the whole body, with all its existing parts */
+
+	/* calculate the new len */
+	out.len = prep_reassemble_body_parts( msg, msg->rcv.bind_address );
+
+	/* get the new buffer */
+	if (out.s)
+		pkg_free(out.s);
+	out.s = (char*)pkg_malloc(out.len+1);
+	if (out.s==0){
+		LM_ERR("out of pkg mem\n");
+		return -1;
+	}
+
+	/* generate the out buffer */
+	out_offs = 0;
+	orig_offs = msg->body->body.s - msg->buf;
+	reassemble_body_parts( msg, out.s, &out_offs, &orig_offs,
+		msg->rcv.bind_address);
+
+	if (out_offs!=out.len) {
+		LM_BUG("len mismatch : calculated %d, written %d\n", out.len, out_offs);
+		abort();
+	}
+
+
+	if (type) {
+
+		/* restore the correct DELETED flag */
+		for (it = &msg->body->first ; it ; it=it->next)
+			if (it!=p) {
+				if (it->flags&SIP_BODY_PART_FLAG_MARKED)
+					it->flags &= ~SIP_BODY_PART_FLAG_MARKED;
+				else
+					it->flags &= ~SIP_BODY_PART_FLAG_DELETED;
+			}
+
+		msg->body->updated_part_count = parts;
+
+	}
+
+	/* continue setting the output variable with the result */
+	val.rs = out;
+	val.flags = PV_VAL_STR;
+	if (pv_set_value( msg, res, 0, &val)!=0) {
+		LM_ERR("failed to set the result to script var\n");
 		return -1;
 	}
 
@@ -1869,3 +1991,58 @@ static int list_hdr_remove_option(struct sip_msg *msg, void *hdr, str *option)
 	return list_hdr_remove_val(msg, (int_str_t *)hdr, option);
 }
 
+static int get_glob_headers_values(struct sip_msg* msg, str* pattern,pv_spec_t* names, pv_spec_t *vals)
+{
+	struct hdr_field *hf;
+	int cnt=0;
+	char tmp;
+	pv_value_t val;
+
+	if (names->type != PVT_AVP) {
+		LM_ERR("AVP needed for names pvar \n");
+		return -1;
+	}
+
+	if (vals->type != PVT_AVP) {
+		LM_ERR("AVP needed for vals pvar \n");
+		return -1;
+	}
+
+
+	/* we need to be sure we have seen all HFs */
+	if (parse_headers(msg, HDR_EOH_F, 0)!=0) {
+		LM_ERR("failed to parse SIP message\n");
+		return -1;
+	}
+	for (hf=msg->headers; hf; hf=hf->next) {
+		tmp = *(hf->name.s+hf->name.len);
+		*(hf->name.s+hf->name.len) = 0;
+		#ifdef FNM_CASEFOLD
+		if(fnmatch(pattern->s, hf->name.s, FNM_CASEFOLD) !=0 ){
+		#else
+		if(fnmatch(pattern->s, hf->name.s, 0) !=0 ){
+		#endif
+			*(hf->name.s+hf->name.len) = tmp;
+			continue;
+		}
+
+		*(hf->name.s+hf->name.len) = tmp;
+
+		val.rs = hf->name;
+		val.flags = PV_VAL_STR;
+		if (pv_set_value( msg, names, 0, &val)!=0) {
+			LM_ERR("failed to set the result to script var\n");
+			return -1;
+		}
+
+		val.rs = hf->body;
+		val.flags = PV_VAL_STR;
+		if (pv_set_value( msg, vals, 0, &val)!=0) {
+			LM_ERR("failed to set the result to script var\n");
+			return -1;
+		}
+
+		cnt++;
+	}
+	return cnt==0 ? -1 : 1;
+}

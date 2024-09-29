@@ -145,6 +145,8 @@ void print_aliases();
 struct socket_info* grep_sock_info_ext(str* host, unsigned short port,
 										unsigned short proto, int check_tag);
 
+struct socket_info* parse_sock_info(str *spec);
+
 struct socket_info* find_si(struct ip_addr* ip, unsigned short port,
 												unsigned short proto);
 
@@ -203,7 +205,7 @@ inline static int parse_proto(unsigned char* s, long len, int* proto)
 	 * must support 4-char arrays for sctp
 	 * must support 7-char arrays for hep_tcp and hep_udp */
 	*proto=PROTO_NONE;
-	if ((len < 2 || len > 4) && len != 7) return -1;
+	if ((len < 2 || len > 5) && len != 7) return -1;
 
 	i=PROTO2UINT(s[0], s[1], s[2]);
 	switch(i){
@@ -249,6 +251,18 @@ inline static int parse_proto(unsigned char* s, long len, int* proto)
 		case PROTO2UINT('s', 'm', 'p'):
 			if(len==4 && (s[3]=='p' || s[3]=='P')) {
 				*proto=PROTO_SMPP; return 0;
+			}
+			break;
+		case PROTO2UINT('m', 's', 'r'):
+			if(len==4) {
+				if (s[3]=='p' || s[3]=='P') {
+					*proto=PROTO_MSRP; return 0;
+				}
+			} else
+			if(len==5) {
+				if ((s[3]=='p' || s[3]=='P') && (s[4]=='s' || s[4]=='S')) {
+					*proto=PROTO_MSRPS; return 0;
+				}
 			}
 			break;
 		default:
@@ -423,6 +437,20 @@ static inline char* proto2str(int proto, char *p)
 			*(p++) = 'p';
 			*(p++) = 'p';
 			break;
+		case PROTO_MSRP:
+			*(p++) = 'm';
+			*(p++) = 's';
+			*(p++) = 'r';
+			*(p++) = 'p';
+			break;
+		case PROTO_MSRPS:
+			*(p++) = 'm';
+			*(p++) = 's';
+			*(p++) = 'r';
+			*(p++) = 'p';
+			*(p++) = 's';
+			break;
+
 		default:
 			LM_CRIT("unsupported proto %d\n", proto);
 	}
@@ -430,11 +458,60 @@ static inline char* proto2str(int proto, char *p)
 	return p;
 }
 
+/* Similar to proto2str(), but proto is written in uppercase. The
+   new resulting pointer will be returned (where writing ended) */
+static inline char* proto2upper(int proto, char *p)
+{
+	switch (proto) {
+	case PROTO_UDP:
+		p = memcpy(p, STR_L("UDP")) + sizeof("UDP")-1;
+		break;
+	case PROTO_TCP:
+		p = memcpy(p, STR_L("TCP")) + sizeof("TCP")-1;
+		break;
+	case PROTO_TLS:
+		p = memcpy(p, STR_L("TLS")) + sizeof("TLS")-1;
+		break;
+	case PROTO_SCTP:
+		p = memcpy(p, STR_L("SCTP")) + sizeof("SCTP")-1;
+		break;
+	case PROTO_WS:
+		p = memcpy(p, STR_L("WS")) + sizeof("WS")-1;
+		break;
+	case PROTO_WSS:
+		p = memcpy(p, STR_L("WSS")) + sizeof("WSS")-1;
+		break;
+	case PROTO_BIN:
+		p = memcpy(p, STR_L("BIN")) + sizeof("BIN")-1;
+		break;
+	case PROTO_BINS:
+		p = memcpy(p, STR_L("BINS")) + sizeof("BINS")-1;
+		break;
+	case PROTO_HEP_UDP:
+		p = memcpy(p, STR_L("HEP_UDP")) + sizeof("HEP_UDP")-1;
+		break;
+	case PROTO_HEP_TCP:
+		p = memcpy(p, STR_L("HEP_TCP")) + sizeof("HEP_TCP")-1;
+		break;
+	case PROTO_SMPP:
+		p = memcpy(p, STR_L("SMPP")) + sizeof("SMPP")-1;
+		break;
+	case PROTO_MSRP:
+		p = memcpy(p, STR_L("MSRP")) + sizeof("MSRP")-1;
+		break;
+	case PROTO_MSRPS:
+		p = memcpy(p, STR_L("MSRPS")) + sizeof("MSRPS")-1;
+		break;
+	default:
+		LM_CRIT("unsupported proto %d\n", proto);
+	}
+
+	return p;
+}
 
 static inline char *proto2a(int proto)
 {
-	static char b[8]; /* IMPORTANT - keep this max aligned with the proto2str
-	                   * with an extra +1 for NULL terminator */
+	static char b[PROTO_NAME_MAX_SIZE+1];
 	char *p;
 
 	/* print the proto name */

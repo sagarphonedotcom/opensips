@@ -180,7 +180,7 @@ struct socket_info* get_send_socket(struct sip_msg *msg,
 	 * eg: ipv4 -> ipv6 or ipv6 -> ipv4) */
 	switch(proto){
 		case PROTO_UDP:
-			if (msg &&
+			if (msg && msg->rcv.bind_address &&
 			msg->rcv.bind_address->address.af==to->s.sa_family &&
 			msg->rcv.bind_address->proto==PROTO_UDP) {
 				send_sock = msg->rcv.bind_address;
@@ -188,7 +188,7 @@ struct socket_info* get_send_socket(struct sip_msg *msg,
 			}
 			/* default logic for all protos */
 		default:
-			/* we don't really now the sending address (we can find it out,
+			/* we don't really know the sending address (we can find it out,
 			 * but we'll need also to see if we listen on it, and if yes on
 			 * which port -> too complicated*/
 			send_sock = (to->s.sa_family==AF_INET) ?

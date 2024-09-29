@@ -134,9 +134,6 @@ int disable_503_translation = 0;
 		(_dest) += (_len) ;\
 	}while(0);
 
-#define append_str_trans(_dest,_src,_len,_msg) \
-	append_str( (_dest), (_src), (_len) );
-
 extern char version[];
 extern int version_len;
 
@@ -1252,7 +1249,7 @@ skip_after:
  *    to be 100% that estimating and building the body leads to the same
  *    result (as len).
  */
-static unsigned int prep_reassemble_body_parts( struct sip_msg* msg,
+unsigned int prep_reassemble_body_parts( struct sip_msg* msg,
 												struct socket_info* send_sock)
 {
 	struct body_part *part;
@@ -1265,7 +1262,8 @@ static unsigned int prep_reassemble_body_parts( struct sip_msg* msg,
 	char *hdr, *it;
 
 	/* set the offset (in the original buffer) at the beginning of the body */
-	orig_offs = msg->body->part_count ? msg->body->body.s-msg->buf : msg->len ;
+	orig_offs = (msg->body && msg->body->body.s) ?
+		msg->body->body.s-msg->buf : msg->len ;
 
 	if (msg->body->updated_part_count==0) {
 
@@ -1917,9 +1915,9 @@ static inline void apply_msg_changes(struct sip_msg *msg,
 		*new_offs += max_offset-*orig_offs;
 	} else {
 		/* copy whatever is left in the original buffer (up to the body) */
-		size = (msg->body->part_count) ?
-			  ((msg->body->body.s - msg->buf) - *orig_offs) /* msg had body */
-			: (msg->len - *orig_offs);                      /* no body */
+		size = msg->body->body.s ?
+			((msg->body->body.s - msg->buf) - *orig_offs)  /* msg had body */
+			: (msg->len - *orig_offs);                     /* no body at all */
 		memcpy(new_buf+*new_offs, msg->buf+*orig_offs, size );
 		*new_offs += size;
 		*orig_offs += size;
@@ -2075,6 +2073,8 @@ static inline int insert_path_as_route(struct sip_msg* msg, str* path)
 		return -1;
 	}
 
+	msg->msg_flags |= FL_HAS_ROUTE_LUMP;
+
 	return 0;
 }
 
@@ -2168,6 +2168,7 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 			}
 			memcpy(extra_params.s, via_params->s, via_params->len);
 			memcpy(extra_params.s + via_params->len, id_buf, id_len);
+			pkg_free(id_buf);
 		} else {
 			extra_params.s=id_buf;
 			extra_params.len=id_len;
@@ -2196,8 +2197,10 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		if(id_buf!=0) {
 			memcpy(extra_params.s, id_buf, id_len);
 			pkg_free(id_buf);
-		} else if (via_params)
+		} else if (via_params) {
 			memcpy(extra_params.s, via_params->s, via_params->len);
+			id_len = via_params->len;
+		}
 		memcpy(extra_params.s+id_len, RPORT, RPORT_LEN-1);
 		extra_params.s[extra_params.len]='\0';
 		LM_DBG("extra param added: <%.*s>\n",extra_params.len, extra_params.s);
@@ -2426,7 +2429,7 @@ char * build_res_buf_from_sip_res( struct sip_msg* msg,
 		new_buf[(int)(msg->first_line.u.reply.status.s-msg->buf)+2] = '0';
 	/* send it! */
 	LM_DBG("copied size: orig:%d, new: %d, rest: %d"
-			" msg=\n%s\n", s_offset, offset, len-s_offset, new_buf);
+			" msg=|\n%s|\n", s_offset, offset, len-s_offset, new_buf);
 
 	*returned_len=new_len;
 	return new_buf;
@@ -2489,39 +2492,40 @@ char * build_res_buf_from_sip_req( unsigned int code, const str *text ,str *new_
 	/* first line */
 	len += SIP_VERSION_LEN + 1/*space*/ + 3/*code*/ + 1/*space*/ +
 		text->len + CRLF_LEN/*new line*/;
-	/*headers that will be copied (TO, FROM, CSEQ,CALLID,VIA)*/
-	for ( hdr=msg->headers ; hdr ; hdr=hdr->next ) {
-		switch (hdr->type) {
-			case HDR_TO_T:
-				if (new_tag && new_tag->len) {
-					to_tag=get_to(msg)->tag_value;
-					if (to_tag.len )
-						len+=new_tag->len-to_tag.len;
-					else
-						len+=new_tag->len+TOTAG_TOKEN_LEN/*";tag="*/;
-				}
-				len += hdr->len;
-				break;
-			case HDR_VIA_T:
-				/* we always add CRLF to via*/
-				len+=(hdr->body.s+hdr->body.len)-hdr->name.s+CRLF_LEN;
-				if (hdr==msg->h_via1) len += received_len+rport_len;
-				break;
-			case HDR_RECORDROUTE_T:
-				/* RR only for 1xx and 2xx replies */
-				if (code<180 || code>=300)
-					break;
-			case HDR_FROM_T:
-			case HDR_CALLID_T:
-			case HDR_CSEQ_T:
-				/* we keep the original termination for these headers*/
-				len += hdr->len;
-				break;
-			default:
-				/* do nothing, we are interested only in the above headers */
-				;
+	/* copy the TO hdr */
+	if (msg->to) {
+		if (new_tag && new_tag->len) {
+			to_tag=get_to(msg)->tag_value;
+			if (to_tag.len )
+				len+=new_tag->len-to_tag.len;
+			else
+				len+=new_tag->len+TOTAG_TOKEN_LEN/*";tag="*/;
 		}
+		len += msg->to->len;
 	}
+
+	/* copy all VIA hdrs */
+	for( hdr=msg->h_via1 ; hdr ; hdr=hdr->sibling) {
+		/* we always add CRLF to via*/
+		len+=(hdr->body.s+hdr->body.len)-hdr->name.s+CRLF_LEN;
+		if (hdr==msg->h_via1) len += received_len+rport_len;
+	}
+	/* copy all Record-Route hdrs */
+	for( hdr=msg->record_route ; hdr ; hdr=hdr->sibling) {
+		/* RR only for 1xx and 2xx replies */
+		if (code>=180 && code<300)
+			len += hdr->len;
+	}
+	/* copy the FROM hdr */
+	if (msg->from)
+		len += msg->from->len;
+	/* copy the CALLID hdr */
+	if (msg->callid)
+		len += msg->callid->len;
+	/* copy the CSEQ hdr */
+	if (msg->cseq)
+		len += msg->cseq->len;
+
 	/* lumps length */
 	for(lump=msg->reply_lump;lump;lump=lump->next) {
 		len += lump->text.len;
@@ -2570,100 +2574,103 @@ char * build_res_buf_from_sip_req( unsigned int code, const str *text ,str *new_
 	p += text->len;
 	memcpy( p, CRLF, CRLF_LEN );
 	p+=CRLF_LEN;
-	/* headers*/
-	for ( hdr=msg->headers ; hdr ; hdr=hdr->next ) {
-		switch (hdr->type)
-		{
-			case HDR_VIA_T:
-				if (hdr==msg->h_via1){
-					i = 0;
-					if (received_buf) {
-						i = msg->via1->host.s - msg->via1->hdr.s +
-							msg->via1->host.len + (msg->via1->port?
-							msg->via1->port_str.len + 1 : 0);
-						/* copy via1 up to params */
-						append_str( p, hdr->name.s, i);
-						/* copy received param */
-						append_str( p, received_buf, received_len);
-					}
-					if (rport_buf){
-						if (msg->via1->rport){ /* delete the old one */
-							/* copy until rport */
-							append_str_trans( p, hdr->name.s+i ,
-								msg->via1->rport->start-hdr->name.s-1-i,msg);
-							/* copy new rport */
-							append_str(p, rport_buf, rport_len);
-							/* copy the rest of the via */
-							append_str_trans(p, msg->via1->rport->start+
-												msg->via1->rport->size,
-												hdr->body.s+hdr->body.len-
-												msg->via1->rport->start-
-												msg->via1->rport->size, msg);
-						}else{ /* just copy rport and rest of hdr */
-							append_str(p, rport_buf, rport_len);
-							append_str_trans( p, hdr->name.s+i ,
-								(hdr->body.s+hdr->body.len)-hdr->name.s-i,msg);
-						}
-					}else{
-						/* normal whole via copy */
-						append_str_trans( p, hdr->name.s+i ,
-							(hdr->body.s+hdr->body.len)-hdr->name.s-i, msg);
-					}
-				}else{
-					/* normal whole via copy */
-					append_str_trans( p, hdr->name.s,
-							(hdr->body.s+hdr->body.len)-hdr->name.s, msg);
-				}
-				append_str( p, CRLF,CRLF_LEN);
-				break;
-			case HDR_RECORDROUTE_T:
-				/* RR only for 1xx and 2xx replies */
-				if (code<180 || code>=300) break;
-				append_str(p, hdr->name.s, hdr->len);
-				break;
-			case HDR_TO_T:
-				if (new_tag && new_tag->len){
-					if (to_tag.len ) { /* replacement */
-						/* before to-tag */
-						append_str( p, hdr->name.s, to_tag.s-hdr->name.s);
-						/* to tag replacement */
-						bmark->to_tag_val.s=p;
-						bmark->to_tag_val.len=new_tag->len;
-						append_str( p, new_tag->s,new_tag->len);
-						/* the rest after to-tag */
-						append_str( p, to_tag.s+to_tag.len,
-							hdr->name.s+hdr->len-(to_tag.s+to_tag.len));
-					}else{ /* adding a new to-tag */
-						after_body=hdr->body.s+hdr->body.len;
-						append_str( p, hdr->name.s, after_body-hdr->name.s);
-						append_str(p, TOTAG_TOKEN, TOTAG_TOKEN_LEN);
-						bmark->to_tag_val.s=p;
-						bmark->to_tag_val.len=new_tag->len;
-						append_str( p, new_tag->s,new_tag->len);
-						append_str( p, after_body,
-										hdr->name.s+hdr->len-after_body);
-					}
-					break;
-				} /* no new to-tag -- proceed to 1:1 copying  */
-				totags=((struct to_body*)(hdr->parsed))->tag_value.s;
-				if (totags) {
-					bmark->to_tag_val.s=p+(totags-hdr->name.s);
-					bmark->to_tag_val.len=
-							((struct to_body*)(hdr->parsed))->tag_value.len;
-				} else {
-					bmark->to_tag_val.s = NULL;
-					bmark->to_tag_val.len = 0;
-				}
-			case HDR_FROM_T:
-			case HDR_CALLID_T:
-			case HDR_CSEQ_T:
-					append_str(p, hdr->name.s, hdr->len);
-					break;
-			default:
-				/* do nothing, we are interested only in the above headers */
-				;
-		} /* end switch */
-	} /* end for */
+	/* VIA headers */
+	if ( (hdr=msg->h_via1)!=NULL ) {
+		/* handle the VIA1, subject to changes */
+		i = 0;
+		if (received_buf) {
+			i = msg->via1->host.s - msg->via1->hdr.s +
+				msg->via1->host.len + (msg->via1->port?
+				msg->via1->port_str.len + 1 : 0);
+			/* copy via1 up to params */
+			append_str( p, hdr->name.s, i);
+			/* copy received param */
+			append_str( p, received_buf, received_len);
+		}
+		if (rport_buf){
+			if (msg->via1->rport){ /* delete the old one */
+				/* copy until rport */
+				append_str( p, hdr->name.s+i ,
+					msg->via1->rport->start-hdr->name.s-1-i);
+				/* copy new rport */
+				append_str(p, rport_buf, rport_len);
+				/* copy the rest of the via */
+				append_str(p, msg->via1->rport->start+
+									msg->via1->rport->size,
+									hdr->body.s+hdr->body.len-
+									msg->via1->rport->start-
+									msg->via1->rport->size);
+			}else{ /* just copy rport and rest of hdr */
+				append_str(p, rport_buf, rport_len);
+				append_str( p, hdr->name.s+i ,
+					(hdr->body.s+hdr->body.len)-hdr->name.s-i);
+			}
+		}else{
+			/* normal whole via copy */
+			append_str( p, hdr->name.s+i ,
+				(hdr->body.s+hdr->body.len)-hdr->name.s-i);
+		}
+		append_str( p, CRLF,CRLF_LEN);
+		/* and now the rest of the VIA hdrs */
+		for( hdr=hdr->sibling ; hdr ; hdr=hdr->sibling) {
+			/* normal whole via copy */
+			append_str( p, hdr->name.s,
+					(hdr->body.s+hdr->body.len)-hdr->name.s);
+			append_str( p, CRLF,CRLF_LEN);
+		}
+	}
+	/* Record-Route headers */
+	for( hdr=msg->record_route ; hdr ; hdr=hdr->sibling) {
+		/* RR only for 1xx and 2xx replies */
+		if (code>=180 && code<300)
+			append_str(p, hdr->name.s, hdr->len);
+	}
+	/* TO hdr */
+	if ( (hdr=msg->to)!=NULL ) {
+		if (new_tag && new_tag->len){
+			if (to_tag.len ) { /* replacement */
+				/* before to-tag */
+				append_str( p, hdr->name.s, to_tag.s-hdr->name.s);
+				/* to tag replacement */
+				bmark->to_tag_val.s=p;
+				bmark->to_tag_val.len=new_tag->len;
+				append_str( p, new_tag->s,new_tag->len);
+				/* the rest after to-tag */
+				append_str( p, to_tag.s+to_tag.len,
+					hdr->name.s+hdr->len-(to_tag.s+to_tag.len));
+			}else{ /* adding a new to-tag */
+				after_body=hdr->body.s+hdr->body.len;
+				append_str( p, hdr->name.s, after_body-hdr->name.s);
+				append_str(p, TOTAG_TOKEN, TOTAG_TOKEN_LEN);
+				bmark->to_tag_val.s=p;
+				bmark->to_tag_val.len=new_tag->len;
+				append_str( p, new_tag->s,new_tag->len);
+				append_str( p, after_body,
+								hdr->name.s+hdr->len-after_body);
+			}
+		} else {
+			/* no new to-tag -- proceed to 1:1 copying  */
+			totags=((struct to_body*)(hdr->parsed))->tag_value.s;
+			if (totags) {
+				bmark->to_tag_val.s=p+(totags-hdr->name.s);
+				bmark->to_tag_val.len=
+					((struct to_body*)(hdr->parsed))->tag_value.len;
+			} else {
+				bmark->to_tag_val.s = NULL;
+				bmark->to_tag_val.len = 0;
+			}
+			append_str(p, hdr->name.s, hdr->len);
+		}
+	}
+	/* FROM header */
+	if (msg->from)
+		append_str(p, msg->from->name.s, msg->from->len);
+	/* CALLID header */
+	if (msg->callid)
+		append_str(p, msg->callid->name.s, msg->callid->len);
+	/* copy the CSEQ hdr */
+	if (msg->cseq)
+		append_str(p, msg->cseq->name.s, msg->cseq->len);
 	/* lumps */
 	for(lump=msg->reply_lump;lump;lump=lump->next)
 		if (lump->flags&LUMP_RPL_HDR){

@@ -28,6 +28,7 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/error-ssl.h>
+#include <wolfssl/wolfcrypt/wc_port.h>
 
 #include "../../dprint.h"
 #include "../../mem/shm_mem.h"
@@ -40,6 +41,15 @@
 
 #include "wolfssl.h"
 #include "wolfssl_api.h"
+
+#if defined __OS_linux
+#include <features.h>
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 2)
+#define __WOLFSSL_ON_EXIT
+#endif
+#endif
+#endif
 
 static int load_tls_wolfssl(struct wolfssl_binds *binds);
 
@@ -81,7 +91,7 @@ int _wolfssl_tls_var_validity(int ind, void *ssl, str *res);
 
 int ssl_versions[SSL_VERSIONS_SIZE];
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"load_tls_wolfssl", (cmd_function)load_tls_wolfssl,
 		{{0,0,0}}, ALL_ROUTES},
 	{0,0,{{0,0,0}},0}
@@ -118,6 +128,15 @@ static void _wolfssl_init_ssl_methods(void)
 	ssl_versions[TLS_USE_TLSv1_3-1] = TLS1_3_VERSION;
 }
 
+static void _wolfssl_show_ciphers(void)
+{
+	char ciphers[4096];
+	int ret = wolfSSL_get_ciphers(ciphers, (int)sizeof(ciphers));
+	if(ret == SSL_SUCCESS){
+		LM_INFO("Ciphers: %s\n", ciphers);
+	}
+}
+
 static void *oss_malloc(size_t size)
 {
 	return shm_malloc(size);
@@ -133,6 +152,13 @@ static void *oss_realloc(void *ptr, size_t size)
 	return shm_realloc(ptr, size);
 }
 
+#ifdef __WOLFSSL_ON_EXIT
+static void _wolfssl_on_exit(int status, void *param)
+{
+       _exit(status);
+}
+#endif
+
 static int mod_init(void)
 {
 	LM_INFO("initializing tls_wolfssl module\n");
@@ -142,6 +168,12 @@ static int mod_init(void)
 	wolfSSL_Init();
 
 	_wolfssl_init_ssl_methods();
+
+	_wolfssl_show_ciphers();
+
+#ifdef __WOLFSSL_ON_EXIT
+       on_exit(_wolfssl_on_exit, NULL);
+#endif
 
 	return 0;
 }

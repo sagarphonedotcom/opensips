@@ -320,7 +320,8 @@ static int matching_3261( struct sip_msg *p_msg, struct cell **trans,
 		p_cell; p_cell = p_cell->next_cell )
 	{
 		t_msg=p_cell->uas.request;
-		if (!t_msg) continue;  /* don't try matching UAC transactions */
+		/* don't try matching UAC transactions */
+		if (is_local(p_cell) || !t_msg) continue;
 		if (skip_method & t_msg->REQ_METHOD) continue;
 
 		/* here we do an exercise which will be removed from future code
@@ -577,6 +578,9 @@ struct cell* t_lookupOriginalT(  struct sip_msg* p_msg )
 		return cancelled_T;
 
 	/* start searching in the table */
+	if (!p_msg->hash_index)
+		p_msg->hash_index = tm_hash( p_msg->callid->body,
+			get_cseq(p_msg)->number);
 	hash_index = p_msg->hash_index;
 	LM_DBG("searching on hash entry %d\n",hash_index );
 
@@ -1124,9 +1128,9 @@ int t_newtran( struct sip_msg* p_msg, int full_uas )
 
 	if (auto_100trying && p_msg->REQ_METHOD==METHOD_INVITE) {
 		ctx_backup = current_processing_ctx;
-		current_processing_ctx = NULL;
+		set_global_context(NULL);
 		t_reply( T, p_msg , 100 , &relay_reason_100);
-		current_processing_ctx = ctx_backup;
+		set_global_context(ctx_backup);
 	}
 
 	return 1;

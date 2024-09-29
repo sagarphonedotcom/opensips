@@ -211,8 +211,8 @@ int cgrates_set_reply_with_values(json_object *jobj)
 	}
 
 	if (json_object_get_type(jobj) != json_type_object) {
-		LM_ERR("reply is not an object - return will not be set!\n");
-		return -1;
+		LM_DBG("reply is not an object - return will not be set!\n");
+		return 1;
 	}
 
 	json_object_object_foreach(jobj, k, v) {
@@ -670,10 +670,8 @@ int cgr_handle_async_cmd(struct sip_msg *msg, json_object *jmsg,
 		if (!(c = cgr_get_free_conn(e)))
 			continue;
 		/* found a free connection - build the buffer */
-		if (cgrc_send(c, &smsg) < 0) {
-			cgrc_close(c, CGRC_IS_LISTEN(c));
+		if (cgrc_send(c, &smsg) < 0)
 			continue;
-		}
 		cp->c = c;
 		/* message successfully sent - now fetch the reply */
 		if (CGRC_IS_DEFAULT(c)) {

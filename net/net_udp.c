@@ -179,12 +179,35 @@ int udp_init_listener(struct socket_info *si, int status_flags)
 		LM_ERR("setsockopt: %s\n", strerror(errno));
 		goto error;
 	}
+
+	if (si->flags & SI_FRAG) {
+		/* no DF */
+#if defined(IP_MTU_DISCOVER)
+		optval = IP_PMTUDISC_DONT;
+		setsockopt(si->socket, IPPROTO_IP, IP_MTU_DISCOVER, (void*)&optval, sizeof(optval));
+#else
+#if defined(IP_DONTFRAG)
+		optval = 1;
+		setsockopt(si->socket, IPPROTO_IP, IP_DONTFRAG, (void*)&optval, sizeof(optval));
+#else
+		LM_ERR("DF flag is not supported by your system\n");
+		goto error;
+#endif
+#endif
+	}
+
 	/* tos */
 	optval=tos;
-	if (setsockopt(si->socket, IPPROTO_IP, IP_TOS, (void*)&optval,
-			sizeof(optval)) ==-1){
-		LM_WARN("setsockopt tos: %s\n", strerror(errno));
-		/* continue since this is not critical */
+	if (addr->s.sa_family==AF_INET6){
+		if (setsockopt(si->socket,  IPPROTO_IPV6, IPV6_TCLASS, (void*)&optval, sizeof(optval)) ==-1){
+			LM_WARN("setsockopt tos for IPV6: %s\n", strerror(errno));
+			/* continue since this is not critical */
+		}
+	} else {
+		if (setsockopt(si->socket, IPPROTO_IP, IP_TOS, (void*)&optval, sizeof(optval)) ==-1){
+			LM_WARN("setsockopt tos: %s\n", strerror(errno));
+			/* continue since this is not critical */
+		}
 	}
 #if defined (__linux__) && defined(UDP_ERRORS)
 	optval=1;
@@ -352,9 +375,13 @@ static int fork_dynamic_udp_process(void *si_filter)
 {
 	struct socket_info *si = (struct socket_info*)si_filter;
 	int p_id;
+	const struct internal_fork_params ifp_udp_rcv = {
+		.proc_desc = "UDP receiver",
+		.flags = OSS_PROC_DYNAMIC|OSS_PROC_NEEDS_SCRIPT,
+		.type = TYPE_UDP,
+	};
 
-	if ((p_id=internal_fork( "UDP receiver",
-	OSS_PROC_DYNAMIC|OSS_PROC_NEEDS_SCRIPT, TYPE_UDP))<0) {
+	if ((p_id=internal_fork(&ifp_udp_rcv))<0) {
 		LM_CRIT("cannot fork UDP process\n");
 		return(-1);
 	} else if (p_id==0) {
@@ -431,6 +458,11 @@ int udp_start_processes(int *chd_rank, int *startup_done)
 	struct socket_info *si;
 	int p_id;
 	int i,p;
+	const struct internal_fork_params ifp_udp_rcv = {
+		.proc_desc = "UDP receiver",
+		.flags = OSS_PROC_NEEDS_SCRIPT,
+		.type = TYPE_UDP,
+	};
 
 	if (udp_disabled)
 		return 0;
@@ -450,8 +482,7 @@ int udp_start_processes(int *chd_rank, int *startup_done)
 
 			for (i=0;i<si->workers;i++) {
 				(*chd_rank)++;
-				if ( (p_id=internal_fork( "UDP receiver",
-				OSS_PROC_NEEDS_SCRIPT, TYPE_UDP))<0 ) {
+				if ( (p_id=internal_fork(&ifp_udp_rcv))<0 ) {
 					LM_CRIT("cannot fork UDP process\n");
 					goto error;
 				} else if (p_id==0) {

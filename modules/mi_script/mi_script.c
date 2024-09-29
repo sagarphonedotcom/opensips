@@ -48,7 +48,7 @@ static int mi_script_func(struct sip_msg *msg, str *m,
 static int mi_script_async_func(struct sip_msg *msg, async_ctx *ctx,
 		str *m, pv_spec_p r, pv_spec_p p, pv_spec_p v);
 
-static param_export_t mi_params[] = {
+static const param_export_t mi_params[] = {
 	{"trace_destination",	STR_PARAM,	&trace_destination_name.s},
 	{"trace_bwlist",		STR_PARAM,	&mi_trace_bwlist_s},
 	{"pretty_printing",		INT_PARAM,	&mi_script_pp},
@@ -65,7 +65,7 @@ static int fixup_check_avp(void** param)
 	return 0;
 }
 
-static cmd_export_t mod_cmds[] = {
+static const cmd_export_t mod_cmds[] = {
 	{"mi", (cmd_function)mi_script_func, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, 0, 0},
@@ -76,7 +76,7 @@ static cmd_export_t mod_cmds[] = {
 	{0,0,{{0,0,0}},0}
 };
 
-static acmd_export_t mod_acmds[] = {
+static const acmd_export_t mod_acmds[] = {
 	{"mi", (acmd_function)mi_script_async_func, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, 0, 0},
@@ -160,7 +160,7 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 	mi_request_t *req = NULL;
 	struct usr_avp *v_avp = NULL;
 	struct usr_avp *a_avp = NULL;
-	int_str avp_val;
+	int_str avp_val, avp_val_v;
 	unsigned int tmp;
 	cJSON *val;
 	char *p;
@@ -211,8 +211,11 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 			trim_leading(params);
 			p = q_memchr(params->s, ' ', params->len);
 			avp_val.s = *params;
-			if (p)
+			if (p) {
 				avp_val.s.len = p - avp_val.s.s;
+				params->s += avp_val.s.len;
+				params->len -= avp_val.s.len;
+			}
 			if (avp_val.s.len <= 0)
 				break;
 			val = cJSON_CreateStr(avp_val.s.s, avp_val.s.len);
@@ -236,15 +239,46 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 		/* check attribute */
 		if (vals) {
 			v_avp = search_first_avp(vals->pvp.pvn.u.isname.type,
-					vals->pvp.pvn.u.isname.name.n, &avp_val, v_avp);
+					vals->pvp.pvn.u.isname.name.n, &avp_val_v, v_avp);
 			if (!v_avp) {
 				LM_ERR("missing attribute\n");
 				goto error;
 			}
-			if (a_avp->flags & AVP_VAL_STR)
-				val = cJSON_CreateStr(avp_val.s.s, avp_val.s.len);
-			else
-				val = cJSON_CreateNumber(avp_val.n);
+			if (a_avp->flags & AVP_VAL_STR) {
+				if (avp_val_v.s.len >= strlen("__array()")
+				    && avp_val_v.s.s[avp_val_v.s.len-1] == ')'
+				    && !memcmp(avp_val_v.s.s, STR_L("__array("))) {
+
+					val = cJSON_CreateArray();
+					if (!val) {
+						LM_ERR("oom\n");
+						goto error;
+					}
+
+					char *p = avp_val_v.s.s + strlen("__array("),
+						 *end = avp_val_v.s.s + avp_val_v.s.len - 1, *arg;
+					do {
+						cJSON *arr_val;
+
+						for (arg = p; p < end && *p != ' '; p++) ;
+
+						arr_val = cJSON_CreateStr(arg, p - arg);
+						if (!arr_val) {
+							cJSON_Delete(val);
+							LM_ERR("oom\n");
+							goto error;
+						}
+
+						cJSON_AddItemToArray(val, arr_val);
+					} while (++p < end);
+
+				} else {
+					val = cJSON_CreateStr(avp_val_v.s.s, avp_val_v.s.len);
+				}
+			} else {
+				val = cJSON_CreateNumber(avp_val_v.n);
+			}
+
 			/* avp is always null terminated */
 			cJSON_AddItemToObject(req->params, avp_val.s.s, val);
 		} else {
@@ -406,7 +440,7 @@ static int mi_script_handle_response(mi_response_t *resp, char **res, int *relea
 
 		tmp = cJSON_GetObjectItem(item, JSONRPC_ERR_MSG_S);
 		if (!tmp)
-			r = "no error message provideded";
+			r = "no error message provided";
 		else
 			r = tmp->valuestring;
 	} else if (res) {
@@ -428,22 +462,27 @@ static int mi_script_handle_sync_response(struct sip_msg *msg,
 		mi_response_t *resp, pv_spec_p r)
 {
 	int ret, release;
-	pv_value_t val;
 	char *res = NULL;
 
 	ret = mi_script_handle_response(resp, (r?&res:NULL), &release);
-	if (res) {
-		val.rs.s = res;
-		val.rs.len = strlen(res);
-		val.flags = PV_VAL_STR;
-	} else {
-		val.rs.s = NULL;
-		val.rs.len = 0;
-		val.flags = PV_VAL_NULL;
+
+	if (r) {
+		pv_value_t val;
+
+		if (res) {
+			val.rs.s = res;
+			val.rs.len = strlen(res);
+			val.flags = PV_VAL_STR;
+		} else {
+			val.rs.s = NULL;
+			val.rs.len = 0;
+			val.flags = PV_VAL_NULL;
+		}
+
+		if (pv_set_value(msg, r, 0, &val) < 0)
+			ret = -3;
 	}
 
-	if (pv_set_value(msg, r, 0, &val) < 0)
-		ret = -3;
 	if (release)
 		cJSON_PurgeString(res);
 	return ret;
@@ -536,17 +575,26 @@ struct mi_script_async_job {
 	mi_request_t *req;
 };
 
+static void mi_script_async_job_free(struct mi_script_async_job *job)
+{
+	if (job->msg.s)
+		shm_free(job->msg.s);
+	shm_free(job);
+}
+
 static void mi_script_async_resume_job(int sender, void *param)
 {
 	int ret;
-	unsigned long r;
+	static unsigned long r = 1;
 	struct mi_script_async_job *job = (struct mi_script_async_job *)param;
 	/* just notify the event socket */
 	do {
 		ret = write(job->fd, &r, sizeof r);
 	} while (ret < 0 && (errno == EINTR || errno == EAGAIN));
-	if (ret < 0)
+	if (ret < 0) {
 		LM_ERR("could not notify resume: %s\n", strerror(errno));
+		mi_script_async_job_free(job);
+	}
 }
 
 static void mi_script_async_job(mi_response_t *resp, struct mi_script_async_job *job)
@@ -567,9 +615,7 @@ static void mi_script_async_job(mi_response_t *resp, struct mi_script_async_job 
 
 	if (ipc_send_rpc(job->process_no, mi_script_async_resume_job, job) < 0) {
 		LM_ERR("could not resume async MI command!\n");
-		if (job->msg.s)
-			shm_free(job->msg.s);
-		shm_free(job);
+		mi_script_async_job_free(job);
 	}
 }
 
@@ -592,6 +638,7 @@ static void mi_script_async_start_job(int sender, void *param)
 	struct mi_script_async_job *job = (struct mi_script_async_job *)param;
 	struct mi_handler *hdl = NULL;
 	mi_response_t *resp = NULL;
+	mi_request_t *req;
 
 	if (job->cmd->flags & MI_ASYNC_RPL_FLAG) {
 		hdl = shm_malloc(sizeof *hdl);
@@ -603,13 +650,17 @@ static void mi_script_async_start_job(int sender, void *param)
 		}
 	}
 
-	resp = handle_mi_request(job->req, job->cmd, hdl);
+	/* backup @req now, before exposing @job to other procs */
+	req = job->req;
+	job->req = NULL;
+
+	resp = handle_mi_request(req, job->cmd, hdl);
 	if (resp != MI_ASYNC_RPL) {
 		mi_script_async_job(resp, job);
 		free_mi_response(resp);
 	}
-	mi_script_free_request(job->req, 1);
-	job->req = NULL;
+
+	mi_script_free_request(req, 1);
 }
 
 /* we use this just for notifying that the request is terminated */
@@ -649,9 +700,7 @@ static int mi_script_async_resume(int fd,
 			ret = -3;
 	}
 end:
-	if (job->msg.s)
-		shm_free(job->msg.s);
-	shm_free(job);
+	mi_script_async_job_free(job);
 	return ret;
 }
 

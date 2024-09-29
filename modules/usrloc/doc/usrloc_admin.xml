@@ -1171,6 +1171,9 @@ modparam("usrloc", "cseq_delay", 5)
         (<emphasis>addresses-of-record</emphasis>, <emphasis>contacts</emphasis>),
 		organized into specific events (inserts, deletes or updates).
 		</para>
+
+			&clusterer_sync_cap_para;
+
 		<para>
 		Default value is 0 (replication disabled).
 		</para>
@@ -1352,8 +1355,7 @@ modparam("usrloc", "latency_event_min_us_delta", 300000)
 		<title><varname>pinging_mode</varname> (string)</title>
 		<para>
 		Depending on the <xref linkend="param_cluster_mode"/>, the module
-		can perform contact pinging using one of at most two possible
-		heuristics:
+		can perform contact pinging using one of two possible heuristics:
 		<itemizedlist>
 		<listitem>
 			<para><emphasis role='bold'>"ownership"</emphasis> - this instance
@@ -1362,7 +1364,7 @@ modparam("usrloc", "latency_event_min_us_delta", 300000)
 				a contact, a node will keep sending pings to that contact as
 				long as it owns the respective tag.  If no shared tag has been
 				specified for a given contact, the default is to assume
-				permanent ownership of the contact and always ping it.
+				permanent ownership of the contact and ping it upon request.
 			</para>
 		</listitem>
 		<listitem>
@@ -1568,38 +1570,36 @@ modparam("usrloc", "contact_refresh_timer", true)
 		<para>Parameters: </para>
 		<itemizedlist>
 			<listitem><para>
-				<emphasis>table name</emphasis> - table where the contact
-				will be added (Ex: location).
+				<emphasis>table name (string)</emphasis> - table where the contact
+				will be added (Ex: "location").
 			</para></listitem>
 			<listitem><para>
-				<emphasis>aor</emphasis> - user AOR in username[@domain]
+				<emphasis>aor (string) </emphasis> - user AOR in username[@domain]
 				format (domain must be supplied only if use_domain option
 				is on).
 			</para></listitem>
 			<listitem><para>
-				<emphasis>contact</emphasis> - contact string to be added
+				<emphasis>contact (string)</emphasis> - Contact URI to be added
 			</para></listitem>
 			<listitem><para>
-				<emphasis>expires</emphasis> - expires value of the contact
+				<emphasis>expires (int)</emphasis> - expires value of the contact
 			</para></listitem>
 			<listitem><para>
-				<emphasis>q</emphasis> - Q value of the contact
+				<emphasis>q (string)</emphasis> - Q value of the contact
 			</para></listitem>
 			<listitem><para>
-				<emphasis>unused</emphasis> - unused attribute (kept for
-				backword compatibility)
-			</para></listitem>
-			<listitem><para>
-				<emphasis>flags</emphasis> - internal USRLOC flags of the
+				<emphasis>flags (int)</emphasis> - internal USRLOC flags of the
 				contact
 			</para></listitem>
 			<listitem><para>
-				<emphasis>cflags</emphasis> - per branch flags of the
+				<emphasis>cflags (int)</emphasis> - per branch flags of the
 				contact
 			</para></listitem>
 			<listitem><para>
-				<emphasis>methods</emphasis> - mask with supported requests
-				of the contact
+				<emphasis>methods (int)</emphasis> - bitmask with supported requests
+				of the contact.  To whitelist all SIP methods, simply use the
+				value <emphasis role='bold'>32767</emphasis>. For a breakdown
+				of each method's value, see the "request_method" internal enum.
 			</para></listitem>
 		</itemizedlist>
 	</section>
@@ -1659,7 +1659,8 @@ modparam("usrloc", "contact_refresh_timer", true)
 		<function moreinfo="none">ul_cluster_sync</function>
 		</title>
 		<para>
-		This command will only take effect if the module is running under a
+		This command will only take effect if the target OpenSIPS instance is
+		paired with a hot backup instance, while running under a
 		cluster-enabled <xref linkend="param_working_mode_preset"/>.
 		</para>
 		<para>
@@ -1824,8 +1825,9 @@ modparam("usrloc", "contact_refresh_timer", true)
 			</para></listitem>
 			<listitem><para>
 				<emphasis>latency</emphasis> - The latency of the last
-				successful ping for this contact. Until the first ping reply
-				for a given contact arrives, its pinging latency will be 0.
+				successful ping for this contact, in microseconds. Until the
+				first ping reply for a given contact arrives, its pinging
+				latency will be 0.
 			</para></listitem>
 			<listitem><para>
 				<emphasis>shtag</emphasis> - The shared tag of the contact,

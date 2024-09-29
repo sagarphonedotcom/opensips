@@ -43,19 +43,22 @@ Dynamic Routing Module
               1.3.20. probing_from (string)
               1.3.21. probing_reply_codes (string)
               1.3.22. probing_socket (string)
-              1.3.23. cluster_id (integer)
-              1.3.24. cluster_sharing_tag (string)
-              1.3.25. use_domain (int)
-              1.3.26. drg_user_col (str)
-              1.3.27. drg_domain_col (str)
-              1.3.28. drg_grpid_col (str)
-              1.3.29. use_partitions (int)
-              1.3.30. db_partitions_url (str)
-              1.3.31. db_partitions_table (str)
-              1.3.32. partition_id_pvar (pvar)
-              1.3.33. enable_restart_persistency (int)
-              1.3.34. extra_prefix_chars (str)
-              1.3.35. rule_tables_query (str)
+              1.3.23. gw_socket_filter_mode (string)
+              1.3.24. cluster_id (integer)
+              1.3.25. cluster_sharing_tag (string)
+              1.3.26. cluster_probing_mode (string)
+              1.3.27. use_domain (int)
+              1.3.28. drg_user_col (str)
+              1.3.29. drg_domain_col (str)
+              1.3.30. drg_grpid_col (str)
+              1.3.31. use_partitions (int)
+              1.3.32. db_partitions_url (str)
+              1.3.33. db_partitions_table (str)
+              1.3.34. partition_id_pvar (pvar)
+              1.3.35. enable_restart_persistency (int)
+              1.3.36. extra_prefix_chars (str)
+              1.3.37. extra_id_chars (str)
+              1.3.38. rule_tables_query (str)
 
         1.4. Exported Functions
 
@@ -68,23 +71,24 @@ Dynamic Routing Module
                       [carrier_attrs_pvar], [partition])
 
               1.4.3. route_to_gw(gw_id, [gw_attrs_var],
-                      [partition])
+                      [carrier_attrs_var], [partition])
 
               1.4.4. use_next_gw( [rule_attrs_pvar],
                       [gw_attrs_pvar], [carrier_attrs_pvar],
                       [partition])
 
               1.4.5. goes_to_gw( [type], [flags], [gw_attrs_pvar],
-                      [partition])
+                      [carrier_attrs_pvar], [partition])
 
-              1.4.6. is_from_gw([type], [flag], [gw_attrs_pvar],
-                      [partition])
+              1.4.6. is_from_gw([type], [flags], [gw_attrs_pvar],
+                      [carrier_attrs_pvar], [partition])
 
-              1.4.7. dr_is_gw( sip_uri, [type], [flag],
-                      [gw_attrs_pvar], [partition])
+              1.4.7. dr_is_gw( sip_uri, [type], [flags],
+                      [gw_attrs_pvar], [carrier_attrs_pvar],
+                      [partition])
 
               1.4.8. dr_disable([partition])
-              1.4.9. dr_match([groupID], [flags], number,
+              1.4.9. dr_match(groupID, [flags], number,
                       [rule_attrs_pvar], [partition])
 
         1.5. Exported MI Functions
@@ -100,7 +104,12 @@ Dynamic Routing Module
 
               1.6.1. E_DROUTING_STATUS
 
-        1.7. Installation
+        1.7. Exported Status/Report Identifiers
+
+              1.7.1. [partition_name]
+              1.7.2. [partition_name];events
+
+        1.8. Installation
 
    2. Developer Guide
    3. Contributors
@@ -143,35 +152,38 @@ Dynamic Routing Module
    1.20. Set probing_from parameter
    1.21. Set probing_reply_codes parameter
    1.22. Set probing_socket parameter
-   1.23. Set cluster_id parameter
-   1.24. Set cluster_sharing_tag parameter
-   1.25. Set use_domain parameter
-   1.26. Set drg_user_col parameter
-   1.27. Set drg_domain_col parameter
-   1.28. Set drg_grpid_col parameter
-   1.29. Set use_partitions parameter
-   1.30. Set db_partitions_url parameter
-   1.31. Set db_partitions_table parameter
-   1.32. Set partition_id_pvar parameter
-   1.33. Set enable_restart_persistency parameter
-   1.34. Set extra_prefix_chars parameter
-   1.35. Set the rule_tables_query parameter
-   1.36. do_routing usage
-   1.37. route_to_carrier usage
-   1.38. route_to_gw usage
-   1.39. use_next_gw usage
-   1.40. goes_to_gw usage
-   1.41. is_from_gw usage
-   1.42. dr_is_gw usage
-   1.43. dr_disable() usage
-   1.44. dr_match usage
-   1.45. dr_gw_status usage when use_partitions is set to 0
-   1.46. dr_gw_status usage when use_partitionsis set to 1
-   1.47. dr_carrier_status usage when use_partitions is 0
-   1.48. dr_carrier_status usage when use_partitions is 1
-   1.49. dr_reload_status usage when use_partitions is 0
-   1.50. dr_reload_status usage when use_partitions is 1
-   1.51. dr_enable_probing usage
+   1.23. Set gw_socket_filter_mode parameter
+   1.24. Set cluster_id parameter
+   1.25. Set cluster_sharing_tag parameter
+   1.26. Set cluster_probing_mode parameter
+   1.27. Set use_domain parameter
+   1.28. Set drg_user_col parameter
+   1.29. Set drg_domain_col parameter
+   1.30. Set drg_grpid_col parameter
+   1.31. Set use_partitions parameter
+   1.32. Set db_partitions_url parameter
+   1.33. Set db_partitions_table parameter
+   1.34. Set partition_id_pvar parameter
+   1.35. Set enable_restart_persistency parameter
+   1.36. Set extra_prefix_chars parameter
+   1.37. Set extra_id_chars parameter
+   1.38. Set the rule_tables_query parameter
+   1.39. do_routing usage
+   1.40. route_to_carrier usage
+   1.41. route_to_gw usage
+   1.42. use_next_gw usage
+   1.43. goes_to_gw usage
+   1.44. is_from_gw usage
+   1.45. dr_is_gw usage
+   1.46. dr_disable() usage
+   1.47. dr_match usage
+   1.48. dr_gw_status usage when use_partitions is set to 0
+   1.49. dr_gw_status usage when use_partitionsis set to 1
+   1.50. dr_carrier_status usage when use_partitions is 0
+   1.51. dr_carrier_status usage when use_partitions is 1
+   1.52. dr_reload_status usage when use_partitions is 0
+   1.53. dr_reload_status usage when use_partitions is 1
+   1.54. dr_enable_probing usage
 
 Chapter 1. Admin Guide
 
@@ -297,10 +309,13 @@ Chapter 1. Admin Guide
      * id (string)
      * list of gateways with/without weights (string)
        (Ex:“gw1=10,gw4=10” or “gw1,gw2”
-     * flags : 0x1 - use weight for sorting the list and not
-       definition order; 0x2 - use only the first gateway from the
-       carrier (depending on the sorting); 0x4 - disable the usage
-       of this carrier
+     * flags : 0x1 - use only the first gateway from the carrier
+       (depending on the sorting); 0x2 - disable the usage of this
+       carrier
+     * sort algorithm : how the list of the gateways should be
+       sorted before being used, NULL - use the DB given order, W
+       - do weight based re-ordering, Q - do quality based sorting
+       (requires the qrouting module)
      * attributes (not used by DR engine, but only pushed to
        script level when routing to this carrier)
 
@@ -349,12 +364,16 @@ Chapter 1. Admin Guide
        be matched for current rule. Time recurrences are based
        closely on the recurring time intervals from the Internet
        Calendaring and Scheduling Core Object Specification
-       (calendar COS), RFC 2445. The set of attributes used in
+       (calendar COS), RFC 2445. The set of attributes used in a
        routing rule specification is a subset of time recurrence
        attributes.
-     * The value stored in database has the format of:
-       <dtstart>|<duration>|<freq>|<until>|<interval>|<byday>|<bym
-       onthday>|<byyearday>|<byweekno>|<bymonth>
+     * The value stored in database has the basic format of:
+       <timezone>|<dtstart>|<dtend>|<duration>|<freq>|<until>|<int
+       erval>|<byday>|<bymonthday>|<byyearday>|<byweekno>|<bymonth
+       > , identical to the input of the check_time_rec() function
+       of the cfgutils module, including the optional use of
+       logical operators linking multiple such strings into a
+       larger expression.
      * When an attribute is not specified, the corresponding place
        must be left empty, whenever another attribute that follows
        in the list has to be specified.
@@ -746,7 +765,41 @@ modparam("drouting", "probing_reply_codes", "501, 403")
 modparam("drouting", "probing_socket", "udp:192.168.1.100:5060")
 ...
 
-1.3.23. cluster_id (integer)
+1.3.23. gw_socket_filter_mode (string)
+
+   This parameter controls the gateway filtering during DB
+   loading, or which gateways are loaded or not into memory
+   depending on the configured socket they have.
+
+   The supported filtering modes are:
+     * "all" - all the gateways defined in DB are loaded into
+       memory, disregarding what socket value they have. NOTE: for
+       the gw sockets not matching any OpenSIPS listeners/sockets,
+       the GW will be loaded with NULL/no socket.
+     * "ignore" - all the gateways defined in DB are loaded into
+       memory, but ignoring the socket value they have (the socket
+       will be set to NULL/NONE with no attempt to check it
+       against the OpenSIPS listeners/sockets).
+     * "matched-only" - in this mode the module will load from DB
+       only the gateways that have a configured a socket matching
+       any of the the OpenSIPS listeners/sockets. If the gateways
+       socket does not match, it will be discards, not loaded into
+       memory at all.
+
+   Default value is “"all"”.
+
+   Example 1.23. Set gw_socket_filter_mode parameter
+...
+# multiple OpenSIPS instances sharing a DR setting, so each should
+# load only the GWs they have sockets for.
+modparam("drouting", "gw_socket_filter_mode", "matched-only")
+...
+# an OpenSIPs instance not doing routing, but needing to be
+# aware of all the gws, so load them all ignoring the sockets
+modparam("drouting", "gw_socket_filter_mode", "ignore")
+...
+
+1.3.24. cluster_id (integer)
 
    The ID of the cluster the module is part of. The clustering
    support is used in drouting module for two purposes: for
@@ -764,35 +817,43 @@ modparam("drouting", "probing_socket", "udp:192.168.1.100:5060")
    which node in the cluster will perform the pinging/probing to
    gateways. See the cluster_sharing_tag option.
 
+   This OpenSIPS cluster exposes the "drouting-status-repl"
+   capability in order to mark nodes as eligible for becoming data
+   donors during an arbitrary sync request. Consequently, the
+   cluster must have at least one node marked with the "seed"
+   value as the clusterer.flags column/property in order to be
+   fully functional. Consult the clusterer - Capabilities chapter
+   for more details.
+
    For more info on how to define and populate a cluster (with
-   OpenSIPS nodes) see the "clusterer" module.
+   OpenSIPS nodes) see the clusterer module.
 
    Default value is “0 (none)”.
 
-   Example 1.23. Set cluster_id parameter
+   Example 1.24. Set cluster_id parameter
 ...
 # replicate gw/carrier status with all OpenSIPS in cluster ID 9
 modparam("drouting", "cluster_id", 9)
 ...
 
-1.3.24. cluster_sharing_tag (string)
+1.3.25. cluster_sharing_tag (string)
 
    The name of the sharing tag (as defined per clusterer modules)
    to control which node is responsible for perform the
    self-triggered actions in the module. Such actions may be the
-   gateway probing or sharing the gateway/carrier status changes.
-   If defined, only the node with active status of this tag will
-   perform the actions (pinging and sharing status).
+   gateway probing (see also the cluster_probing_mode parameter)
+   or sharing the gateway/carrier status changes. If defined, only
+   the node with active status of this tag will perform the
+   actions (pinging and sharing status).
 
    The cluster_id must be defined for this option to work.
 
    This is an optional parameter. If not set, all the nodes in the
-   cluster will individually do the probing and share the status
-   changes.
+   cluster will share the status changes.
 
    Default value is “empty (none)”.
 
-   Example 1.24. Set cluster_sharing_tag parameter
+   Example 1.25. Set cluster_sharing_tag parameter
 ...
 # only the node with the active "vip" sharing tag will perform pinging
 # and broadcast the status changes
@@ -800,55 +861,95 @@ modparam("drouting", "cluster_id", 9)
 modparam("drouting", "cluster_sharing_tag", "vip")
 ...
 
-1.3.25. use_domain (int)
+1.3.26. cluster_probing_mode (string)
+
+   This paramter controls how the probing/pinging should be done
+   when using the clustering support. It is about which node in
+   the cluster pings which gateway/destination.
+
+   The cluster_id must be defined for this option to work.
+
+   The supported probing modes are:
+     * "all" - all the nodes in the cluster will independetly ping
+       all the defined gateways, an "all" pings "all" mode.
+     * "by-shtag" - all the gateways are pinged by only one node
+       in the cluster, the node having the cluster_sharing_tag
+       active. By activating the sharing tag on a different node,
+       the pinging duty will be transfered to another node in the
+       cluster.
+     * "distributed" - the pinging effort is distributed across
+       all the nodes in the cluster, so each node will ping a
+       sub-set of the overall set of gateway. Still all the
+       gateways will get pinged (and only once per pinging cycle).
+       The re-partitioning of the pinging effort over the
+       available nodes in the cluster is automatically done when
+       new nodes are joining or nodes are dropping out. Still
+       there is no guaratee on which node will be responsible for
+       pinging which gateway.
+
+   Default value is “"all"”.
+
+   Example 1.26. Set cluster_probing_mode parameter
+...
+# only the node with the active "vip" sharing tag will perform pinging
+modparam("drouting", "cluster_id", 9)
+modparam("drouting", "cluster_sharing_tag", "vip")
+modparam("drouting", "cluster_probing_mode", "by-shtag")
+...
+# the pinging effort is distributed across all the nodes
+modparam("drouting", "cluster_id", 9)
+modparam("drouting", "cluster_probing_mode", "distributed")
+...
+
+1.3.27. use_domain (int)
 
    Flag to configure whether to use domain match when querying
    database for user's routing group.
 
    Default value is “1”.
 
-   Example 1.25. Set use_domain parameter
+   Example 1.27. Set use_domain parameter
 ...
 modparam("drouting", "use_domain", 0)
 ...
 
-1.3.26. drg_user_col (str)
+1.3.28. drg_user_col (str)
 
    The name of the column in group db table where the username is
    stored.
 
    Default value is “username”.
 
-   Example 1.26. Set drg_user_col parameter
+   Example 1.28. Set drg_user_col parameter
 ...
 modparam("drouting", "drg_user_col", "user")
 ...
 
-1.3.27. drg_domain_col (str)
+1.3.29. drg_domain_col (str)
 
    The name of the column in group db table where the domain is
    stored.
 
    Default value is “domain”.
 
-   Example 1.27. Set drg_domain_col parameter
+   Example 1.29. Set drg_domain_col parameter
 ...
 modparam("drouting", "drg_domain_col", "host")
 ...
 
-1.3.28. drg_grpid_col (str)
+1.3.30. drg_grpid_col (str)
 
    The name of the column in group db table where the group id is
    stored.
 
    Default value is “groupid”.
 
-   Example 1.28. Set drg_grpid_col parameter
+   Example 1.30. Set drg_grpid_col parameter
 ...
 modparam("drouting", "drg_grpid_col", "grpid")
 ...
 
-1.3.29. use_partitions (int)
+1.3.31. use_partitions (int)
 
    Flag to configure whether to use partitions for routing. If
    this flag is set then the db_partitions_url and
@@ -856,12 +957,12 @@ modparam("drouting", "drg_grpid_col", "grpid")
 
    Default value is “0”.
 
-   Example 1.29. Set use_partitions parameter
+   Example 1.31. Set use_partitions parameter
 ...
 modparam("drouting", "use_partitions", 1)
 ...
 
-1.3.30. db_partitions_url (str)
+1.3.32. db_partitions_url (str)
 
    The url to the database containing partition-specific
    information. (partition-specific information includes partition
@@ -872,25 +973,25 @@ modparam("drouting", "use_partitions", 1)
 
    Default value is “"NULL"”.
 
-   Example 1.30. Set db_partitions_url parameter
+   Example 1.32. Set db_partitions_url parameter
 ...
 modparam("drouting", "db_partitions_url", "mysql://user:password@localho
 st/opensips_partitions")
 ...
 
-1.3.31. db_partitions_table (str)
+1.3.33. db_partitions_table (str)
 
    The name of the table containing partition definitions. To be
    used with use_partitions and db_partitions_url.
 
    Default value is “dr_partitions”.
 
-   Example 1.31. Set db_partitions_table parameter
+   Example 1.33. Set db_partitions_table parameter
 ...
 modparam("drouting", "db_partitions_table", "partition_defs")
 ...
 
-1.3.32. partition_id_pvar (pvar)
+1.3.34. partition_id_pvar (pvar)
 
    Variable which will store the name of the name partition when
    wildcard(*) operatior is used. Use_partitions must be set in
@@ -900,12 +1001,12 @@ modparam("drouting", "db_partitions_table", "partition_defs")
 
    Default value is “null(not used)”.
 
-   Example 1.32. Set partition_id_pvar parameter
+   Example 1.34. Set partition_id_pvar parameter
 ...
 modparam("drouting", "partition_id_pvar", "$var(matched_partition)")
 ...
 
-1.3.33. enable_restart_persistency (int)
+1.3.35. enable_restart_persistency (int)
 
    Parameter set to enable restart persistency for the Dynamic
    Routing module. When this parameter is set, the drouting module
@@ -921,12 +1022,12 @@ modparam("drouting", "partition_id_pvar", "$var(matched_partition)")
 
    Default value is “0 (disabled)”.
 
-   Example 1.33. Set enable_restart_persistency parameter
+   Example 1.35. Set enable_restart_persistency parameter
 ...
 modparam("drouting", "enable_restart_persistency", yes)
 ...
 
-1.3.34. extra_prefix_chars (str)
+1.3.36. extra_prefix_chars (str)
 
    List of ASCII (0-127) characters to be additionally accepted in
    the prefixes. By default only '0' - '9' chars (digits) are
@@ -934,12 +1035,25 @@ modparam("drouting", "enable_restart_persistency", yes)
 
    Default value is “NULL”.
 
-   Example 1.34. Set extra_prefix_chars parameter
+   Example 1.36. Set extra_prefix_chars parameter
 ...
 modparam("drouting", "extra_prefix_chars", "#-%")
 ...
 
-1.3.35. rule_tables_query (str)
+1.3.37. extra_id_chars (str)
+
+   A set of extra characters to be allowed in both Gateway and
+   Carrier unique string identifiers, on top of alphanumeric
+   characters.
+
+   Default value is “_-.”.
+
+   Example 1.37. Set extra_id_chars parameter
+...
+modparam("drouting", "extra_id_chars", ":_-.")
+...
+
+1.3.38. rule_tables_query (str)
 
    This parameter offers a dynamic, SQL-based way of building a
    set of dr_rules-compatible table names, to be each loaded and
@@ -954,7 +1068,7 @@ modparam("drouting", "extra_prefix_chars", "#-%")
    This parameter may be set multiple times (each definition
    creates a new mapping).
 
-   Example 1.35. Set the rule_tables_query parameter
+   Example 1.38. Set the rule_tables_query parameter
 ...
 # first, set the "dr_rules" table name to the name of your query
 modparam("drouting", "drr_table", "MY_RULES_QUERY")
@@ -975,8 +1089,7 @@ modparam("drouting", "rule_tables_query", "
    Function to trigger routing of the message according to the
    rules in the database table and the configured parameters.
 
-   This function can be used from REQUEST_ROUTE, FAILURE_ROUTE,
-   BRANCH_ROUTE and LOCAL_ROUTE.
+   This function can be used from all routes.
 
    If you set use_partitions to 1 the partition last parameter
    becomes mandatory.
@@ -1021,7 +1134,7 @@ modparam("drouting", "rule_tables_query", "
        specifing the name of one partition, you can use the "*"
        wildcard sign to force routing over all partitions.
 
-   Example 1.36. do_routing usage
+   Example 1.39. do_routing usage
 ...
 # all groups, sort on order, use_partitions is 0
 do_routing();
@@ -1060,8 +1173,7 @@ do_routing(2, "F", , , $var(gw_attributes));
    carrier based (call will be sent to the GWs of that carrier,
    based on carrier policy).
 
-   This function can be used from REQUEST_ROUTE, FAILURE_ROUTE,
-   BRANCH_ROUTE and LOCAL_ROUTE.
+   This function can be used from all routes.
 
    If you set use_partitions parameter to 1 you must supply the
    "partition" parameter also (where the carrier are to be found).
@@ -1078,7 +1190,7 @@ do_routing(2, "F", , , $var(gw_attributes));
        "use_partition" module parameter is turned on. Wildcard
        sign is not accepted by the function.
 
-   Example 1.37. route_to_carrier usage
+   Example 1.40. route_to_carrier usage
 ...
 # use_partitions is not set
 if ( route_to_carrier("my_top_carrier, def_carrier", , $var(carrier_att)
@@ -1106,14 +1218,14 @@ if ( route_to_carrier($var(carrierId), , , $var(my_partition)) ) {
 }
 ...
 
-1.4.3.  route_to_gw(gw_id, [gw_attrs_var], [partition])
+1.4.3.  route_to_gw(gw_id, [gw_attrs_var], [carrier_attrs_var],
+[partition])
 
    Function to trigger the direct routing to a given gateway (or
    list of gateways). Attributes and per-gw processing will be
    available.
 
-   This function can be used from REQUEST_ROUTE, FAILURE_ROUTE,
-   BRANCH_ROUTE and LOCAL_ROUTE.
+   This function can be used from all routes.
 
    If you set use_partitions parameter to 1 you must supply the
    "partition" parameter to instruct on the partition where the
@@ -1124,12 +1236,16 @@ if ( route_to_carrier($var(carrierId), , , $var(my_partition)) ) {
      * gw_attrs_pvar (var, optional) - an output writable variable
        which will be populated with the attributes of the
        currently matched gateway.
+     * carrier_attrs_pvar (var, optional) - an output writable
+       variable which will be populated with the attributes of
+       this carrier. NOTE: the first carrier pointing to the GW(s)
+       will be considered!
      * partition (string, optional) - the name of the DR partition
        to be used. This parameter is to be defined ONLY if the
        "use_partition" module parameter is turned on. Wildcard
        sign is not accepted by the function.
 
-   Example 1.38. route_to_gw usage
+   Example 1.41. route_to_gw usage
 ...
 # use_partitions is not set
 if ( route_to_gw("gw_europe") ) {
@@ -1146,13 +1262,13 @@ if ( route_to_gw("gw1,gw2,gw3", $var(gw_attrs)) ) {
 }
 ...
 # use_partitions is enabled
-if ( route_to_gw("gw_europe", , "my_partition") ) {
+if ( route_to_gw("gw_europe", , , "my_partition") ) {
         t_relay();
         exit;
 }
 ...
 # use_partitions is enabled
-if ( route_to_gw("gw1,gw2,gw3", $var(gw_attrs), "my_partition") ) {
+if ( route_to_gw("gw1,gw2,gw3", $var(gw_attrs), , "my_partition") ) {
         xlog("Relaying to first gateway from our list - $var(gw_attrs)\n
 ");
         t_relay();
@@ -1195,7 +1311,7 @@ if ( route_to_gw("gw1,gw2,gw3", $var(gw_attrs), "my_partition") ) {
        "use_partition" module parameter is turned on. Wildcard
        sign is not accepted by the function.
 
-   Example 1.39. use_next_gw usage
+   Example 1.42. use_next_gw usage
 ...
 # use_partitions is not set
 if (use_next_gw()) {
@@ -1226,7 +1342,8 @@ if (use_next_gw( , ,$var(carrier_attrs), "my_partition")) {
 }
 ...
 
-1.4.5.  goes_to_gw( [type], [flags], [gw_attrs_pvar], [partition])
+1.4.5.  goes_to_gw( [type], [flags], [gw_attrs_pvar],
+[carrier_attrs_pvar], [partition])
 
    Function returns true if the destination of the current request
    (destination URI or Request URI) points (as IP) to one of the
@@ -1236,7 +1353,7 @@ if (use_next_gw( , ,$var(carrier_attrs), "my_partition")) {
    This function does not change anything in the message.
 
    This function can be used from REQUEST_ROUTE, FAILURE_ROUTE,
-   BRANCH_ROUTE and ONREPLY_ROUTE.
+   BRANCH_ROUTE, ONREPLY_ROUTE and LOCAL_ROUTE.
 
    If you set use_partitions parameter to 1 you must supply the
    "partition" parameter to instruct on the partition where the
@@ -1263,12 +1380,15 @@ if (use_next_gw( , ,$var(carrier_attrs), "my_partition")) {
      * gw_attrs_pvar (var, optional) - an output writable variable
        which will be populated with the attributes of the matched
        gateway.
+     * carrier_attrs_pvar (var, optional) - an output writable
+       variable which will be populated with the attributes of the
+       matched carrier.
      * partition (string, optional) - the name of the DR partition
        to be used. This parameter is to be defined ONLY if the
        "use_partition" module parameter is turned on. Wildcard
        sign is accepted by this function.
 
-   Example 1.40. goes_to_gw usage
+   Example 1.43. goes_to_gw usage
 ...
 # use_partitions is not set
 if (goes_to_gw( 1, , $var(gw_attrs))) {
@@ -1277,13 +1397,14 @@ if (goes_to_gw( 1, , $var(gw_attrs))) {
 }
 ...
 # use_partitions is enabledt
-if (goes_to_gw(1, , $var(gw_attrs), "my_partition")) {
+if (goes_to_gw(1, , $var(gw_attrs), , "my_partition")) {
         sl_send_reply(403,"Forbidden");
         exit;
 }
 ...
 
-1.4.6.  is_from_gw([type], [flag], [gw_attrs_pvar], [partition])
+1.4.6.  is_from_gw([type], [flags], [gw_attrs_pvar],
+[carrier_attrs_pvar], [partition])
 
    The function checks if the sender of the message (source IP +
    source port) is a gateway from a certain group.
@@ -1319,12 +1440,15 @@ if (goes_to_gw(1, , $var(gw_attrs), "my_partition")) {
      * gw_attrs_pvar (var, optional) - an output writable variable
        which will be populated with the attributes of the matched
        gateway.
+     * carrier_attrs_pvar (var, optional) - an output writable
+       variable which will be populated with the attributes of the
+       matched carrier.
      * partition (string, optional) - the name of the DR partition
        to be used. This parameter is to be defined ONLY if the
        "use_partition" module parameter is turned on. Wildcard
        sign is accepted by this function.
 
-   Example 1.41. is_from_gw usage
+   Example 1.44. is_from_gw usage
 # use_partitions is not set
 # match the source IP (only) against all gateways
 if (is_from_gw(-1, "n")) {
@@ -1334,20 +1458,19 @@ if (is_from_gw(-1, "n")) {
 # use_partitions is enabled
 # match the source IP and port against all gateways from the "outbound"
 # partition and return the matched gateway's carrier
-if (is_from_gw(, "c", , "outbound")) {
+if (is_from_gw(, "c", , , "outbound")) {
         ...
 }
 
-1.4.7.  dr_is_gw( sip_uri, [type], [flag], [gw_attrs_pvar],
-[partition])
+1.4.7.  dr_is_gw( sip_uri, [type], [flags], [gw_attrs_pvar],
+[carrier_attrs_pvar], [partition])
 
    The function checks if the SIP URI hostname part stored inside
    the "src_pv" pseudo-variable is a gateway from a certain group.
 
    This function does not change anything in the message.
 
-   This function can be used from REQUEST_ROUTE, FAILURE_ROUTE,
-   BRANCH_ROUTE and ONREPLY_ROUTE.
+   This function can be used from all routes.
 
    If you set use_partitions parameter to 1 you must supply the
    "partition" parameter to instruct on the partition where the
@@ -1376,12 +1499,15 @@ if (is_from_gw(, "c", , "outbound")) {
      * gw_attrs_pvar (var, optional) - an output writable variable
        which will be populated with the attributes of the matched
        gateway.
+     * carrier_attrs_pvar (var, optional) - an output writable
+       variable which will be populated with the attributes of the
+       matched carrier.
      * partition (string, optional) - the name of the DR partition
        to be used. This parameter is to be defined ONLY if the
        "use_partition" module parameter is turned on. Wildcard
        sign is accepted by this function.
 
-   Example 1.42. dr_is_gw usage
+   Example 1.45. dr_is_gw usage
 # match the SIP URI host within $var(uac) against all gateways
 if (dr_is_gw( $var(uac), , "n")) {
         ...
@@ -1390,7 +1516,7 @@ if (dr_is_gw( $var(uac), , "n")) {
 
 # match the SIP URI host within $var(uac) against
 # all gws in "outbound" partition
-if (dr_is_gw( $avp(uac), , "n", , "partition")) {
+if (dr_is_gw( $avp(uac), , "n", , , "partition")) {
         ...
 }
 
@@ -1415,7 +1541,7 @@ if (dr_is_gw( $avp(uac), , "n", , "partition")) {
        "use_partition" module parameter is turned on. Wildcard
        sign is accepted by this function.
 
-   Example 1.43. dr_disable() usage
+   Example 1.46. dr_disable() usage
 ...
 if (t_check_status("(408)|(5[0-9][0-9])")) {
         dr_disable();
@@ -1428,7 +1554,7 @@ if (t_check_status("(408)|(5[0-9][0-9])")) {
 }
 ...
 
-1.4.9.  dr_match([groupID], [flags], number, [rule_attrs_pvar],
+1.4.9.  dr_match(groupID, [flags], number, [rule_attrs_pvar],
 [partition])
 
    The function tries to match/check the given number against the
@@ -1449,6 +1575,7 @@ if (t_check_status("(408)|(5[0-9][0-9])")) {
           + L - Do strict length matching over the prefix -
             actually DR engine will do full number matching and
             not prefix matching anymore.
+     * number (string) - the number to check
      * rule_attrs_pvar (var, optional) - a writable variable which
        will be populated with the attributes of the matched
        dynamic routing rule.
@@ -1456,7 +1583,7 @@ if (t_check_status("(408)|(5[0-9][0-9])")) {
        to be used. This parameter is to be defined ONLY if the
        "use_partition" module parameter is turned on.
 
-   Example 1.44. dr_match usage
+   Example 1.47. dr_match usage
 ...
 if ( dr_match( 1, "L" , $fU, ,"dids") )
         xlog("Full From Username $fU found in group 1 partition DIDS\n")
@@ -1473,10 +1600,20 @@ if ( dr_match( 1, , $var(did) ) )
    Command to reload routing rules from database.
      * if use_partition is set to 0 - all routing rules will be
        reloaded.
+          + inherit_state (optional) : whether inherit old state
+            of the gateway , default is y.
+               o “n”: no inherit state
+               o “y”: inherit state
      * if use_partition is set to 1, the parameters are:
           + partition_name (optional) - if not provided all the
             partitions will be reloaded, otherwise just the
             partition given as parameter will be reloaded.
+       <listitem>
+       inherit_state (optional) : whether inherit old state of the
+       gateway , default is y.
+          + “n”: no inherit state
+          + “y”: inherit state
+       </listitem>
 
    MI FIFO Command Format:
                 opensips-cli -x mi dr_reload part_1
@@ -1506,7 +1643,7 @@ if ( dr_match( 1, , $var(did) ) )
             GW (0 - disable, 1 - enable). Only makes sense if
             gw_id is provided.
 
-   Example 1.45. dr_gw_status usage when use_partitions is set to
+   Example 1.48. dr_gw_status usage when use_partitions is set to
    0
 $ opensips-cli -x mi dr_gw_status gw_id=2
 State:: Active
@@ -1516,7 +1653,7 @@ Enabled:: Disabled MI
 $ opensips-cli -x mi dr_gw_status gw_id=3
 Enabled:: Inactive
 
-   Example 1.46. dr_gw_status usage when use_partitionsis set to 1
+   Example 1.49. dr_gw_status usage when use_partitionsis set to 1
 $ opensips-cli -x mi dr_gw_status partition_name=part_1 gw_id=my_gw
 State:: Active
 $ opensips-cli -x mi dr_gw_status partition_name=part_1 gw_id=my_gw stat
@@ -1551,14 +1688,14 @@ enabled:: inactive
             carrier (0 - disable, 1 - enable). Only makes sense if
             carrier_id is provided.
 
-   Example 1.47. dr_carrier_status usage when use_partitions is 0
+   Example 1.50. dr_carrier_status usage when use_partitions is 0
 $ opensips-cli -x mi dr_carrier_status carrier_id=CR1
 Enabled:: no
 $ opensips-cli -x mi dr_carrier_status carrier_id=CR1 status=1
 $ opensips-cli -x mi dr_carrier_status carrier_id=CR1
 Enabled:: yes
 
-   Example 1.48. dr_carrier_status usage when use_partitions is 1
+   Example 1.51. dr_carrier_status usage when use_partitions is 1
 $ opensips-cli -x mi dr_carrier_status partition_name=my_partition carri
 er_id=CR1
 Enabled:: no
@@ -1580,11 +1717,11 @@ Enabled:: yes
             every partition. Otherwise, the function will list the
             time of the last reload for the given partition.
 
-   Example 1.49. dr_reload_status usage when use_partitions is 0
+   Example 1.52. dr_reload_status usage when use_partitions is 0
 $ opensips-cli -x mi dr_reload_status
 Date:: Tue Aug 12 12:26:00 2014
 
-   Example 1.50. dr_reload_status usage when use_partitions is 1
+   Example 1.53. dr_reload_status usage when use_partitions is 1
 $ opensips-cli -x mi dr_reload_status
 Partition:: part_test Date=Tue Aug 12 12:24:13 2014
 Partition:: part_2 Date=Tue Aug 12 12:24:13 2014
@@ -1620,7 +1757,7 @@ Partition:: part_test Date=Tue Aug 12 12:24:13 2014
    Parameters:
      * status (optional) - 1 - enable, 0 - disable gateway probing
 
-   Example 1.51. dr_enable_probing usage
+   Example 1.54. dr_enable_probing usage
 $ opensips-cli -x mi dr_enable_probing
 Status:: 1
 $ opensips-cli -x mi dr_enable_probing 0
@@ -1644,7 +1781,93 @@ Status:: 0
        if it was disabled from the script or active if the gateway
        is enabled.
 
-1.7. Installation
+1.7. Exported Status/Report Identifiers
+
+   The module provides the "drouting" Status/Report group, where
+   each routing partition is defined as a separate SR identifier.
+
+1.7.1. [partition_name]
+
+   The status of these identifiers reflects the readiness/status
+   of the cached data (if available or not when being loaded from
+   DB):
+     * -2 - no data at all (initial status)
+     * -1 - no data, initial loading in progress
+     * 1 - data loaded, partition ready
+     * 2 - data available, a reload in progress
+
+   Reload reporting:
+
+   In terms of data reloading, the following logs will be
+   reported:
+     * starting DB data loading
+     * DB data loading failed, discarding
+     * DB data loading successfully completed
+     * N gateways loaded (N discarded), N carriers loaded (N
+       discarded), N rules loaded (N discarded)
+
+    {
+        "Name": "Default",
+        "Reports": [
+            {
+                "Timestamp": 1652353940,
+                "Date": "Thu May 12 14:12:20 2022",
+                "Log": "starting DB data loading"
+            },
+            {
+                "Timestamp": 1652353940,
+                "Date": "Thu May 12 14:12:20 2022",
+                "Log": "DB data loading successfully completed"
+            },
+            {
+                "Timestamp": 1652353940,
+                "Date": "Thu May 12 14:12:20 2022",
+                "Log": "2 gateways loaded (0 discarded), 2 carriers load
+ed (0 discarded), 1 rules loaded (0 discarded)"
+            }
+        ]
+    }
+
+1.7.2. [partition_name];events
+
+   GW/Carrier switching reporting:
+
+   For reporting events related to the state changes of the
+   gateways and carriers, the module provides separate identifiers
+   (still one per partition). Why separate ones? The reports on
+   state changing may be verbose and there is the risk of
+   loose/discard important reports on reloads due to the high
+   number of logs on state changes;
+
+   So, each partition will provide the identified
+   "partition_name;events" for reporting state changes of gateways
+   and carriers, along with the reason of the change. This
+   identifiers have a 200 records history before discarding the
+   old ones.
+    {
+        "Name": "Default;events",
+        "Reports": [
+            {
+                "Timestamp": 1652353976,
+                "Date": "Thu May 12 14:12:56 2022",
+                "Log": "GW <gw1_1>/127.0.1.1 switched to [inactive] due
+probing reply\n"
+            },
+            {
+                "Timestamp": 1652353976,
+                "Date": "Thu May 12 14:12:56 2022",
+                "Log": "GW <gw2_1>/127.0.1.2 switched to [inactive] due
+probing reply\n"
+            }
+        ]
+    }
+
+   For how to access and use the Status/Report information, please
+   see
+   https://www.opensips.org/Documentation/Interface-StatusReport-3
+   -3.
+
+1.8. Installation
 
    The module requires 4 tables in the OpenSIPS database:
    dr_groups, dr_gateways, dr_carriers, dr_rules. The SQL syntax
@@ -1666,24 +1889,24 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 379 181 12944 5585
-   2. Liviu Chircu (@liviuchircu) 146 84 2410 2564
-   3. Razvan Crainea (@razvancrainea) 95 49 1144 2204
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 410 201 13804 5822
+   2. Liviu Chircu (@liviuchircu) 159 95 2511 2611
+   3. Razvan Crainea (@razvancrainea) 100 53 1171 2226
    4. Mihai Tiganus (@tallicamike) 71 20 4301 910
-   5. Vlad Patrascu (@rvlad-patrascu) 38 17 1090 728
+   5. Vlad Patrascu (@rvlad-patrascu) 41 20 1100 735
    6. Vlad Paiu (@vladpaiu) 23 20 244 47
    7. Andrei Datcu (@andrei-datcu) 20 12 551 134
    8. Ovidiu Sas (@ovidiusas) 15 11 132 70
    9. Ionut Ionita (@ionutrazvanionita) 15 9 370 108
    10. Andrei Dragus 10 3 657 40
 
-   All remaining contributors: Anca Vamanu, Nick Altmann
-   (@nikbyte), Jeremy Martinez (@JeremyMartinez51), Maksym
-   Sobolyev (@sobomax), Dusan Klinec (@ph4r05), Walter Doekes
-   (@wdoekes), Matt Lehner, Julián Moreno Patiño, Sergio
-   Gutierrez, Le Roy Christophe, Peter Lemenkov (@lemenkov),
-   Alexey Vasilyev (@vasilevalex), Ozzyboshi, Aron Podrigal
-   (@ar45).
+   All remaining contributors: Maksym Sobolyev (@sobomax), Anca
+   Vamanu, Nick Altmann (@nikbyte), Jeremy Martinez
+   (@JeremyMartinez51), wangdd, nexbridge, Dusan Klinec (@ph4r05),
+   Walter Doekes (@wdoekes), MayamaTakeshi, Matt Lehner, Julián
+   Moreno Patiño, Sergio Gutierrez, Le Roy Christophe, Peter
+   Lemenkov (@lemenkov), Alexey Vasilyev (@vasilevalex),
+   Ozzyboshi, Aron Podrigal (@ar45).
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1705,23 +1928,25 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Liviu Chircu (@liviuchircu)         Nov 2012 - Aug 2021
-   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2008 - Aug 2021
-   3.  Razvan Crainea (@razvancrainea)     Sep 2010 - Jun 2021
-   4.  Nick Altmann (@nikbyte)             Mar 2013 - May 2021
-   5.  Walter Doekes (@wdoekes)            May 2014 - Apr 2021
-   6.  Aron Podrigal (@ar45)               Nov 2020 - Nov 2020
-   7.  Maksym Sobolyev (@sobomax)          Oct 2020 - Oct 2020
-   8.  Vlad Patrascu (@rvlad-patrascu)     Mar 2017 - Jan 2020
-   9.  Vlad Paiu (@vladpaiu)               Aug 2011 - Nov 2018
-   10. Alexey Vasilyev (@vasilevalex)      Oct 2018 - Oct 2018
+   1.  Liviu Chircu (@liviuchircu)         Nov 2012 - Sep 2024
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2008 - Mar 2024
+   3.  Razvan Crainea (@razvancrainea)     Sep 2010 - Oct 2023
+   4.  wangdd                              May 2023 - May 2023
+   5.  MayamaTakeshi                       Apr 2023 - Apr 2023
+   6.  nexbridge                           Feb 2023 - Mar 2023
+   7.  Maksym Sobolyev (@sobomax)          Oct 2020 - Feb 2023
+   8.  Vlad Patrascu (@rvlad-patrascu)     Mar 2017 - Jul 2022
+   9.  Nick Altmann (@nikbyte)             Mar 2013 - May 2021
+   10. Walter Doekes (@wdoekes)            May 2014 - Apr 2021
 
-   All remaining contributors: Peter Lemenkov (@lemenkov), Ovidiu
-   Sas (@ovidiusas), Jeremy Martinez (@JeremyMartinez51), Le Roy
-   Christophe, Ionut Ionita (@ionutrazvanionita), Ozzyboshi,
-   Julián Moreno Patiño, Dusan Klinec (@ph4r05), Mihai Tiganus
-   (@tallicamike), Andrei Datcu (@andrei-datcu), Matt Lehner, Anca
-   Vamanu, Andrei Dragus, Sergio Gutierrez.
+   All remaining contributors: Aron Podrigal (@ar45), Vlad Paiu
+   (@vladpaiu), Alexey Vasilyev (@vasilevalex), Peter Lemenkov
+   (@lemenkov), Ovidiu Sas (@ovidiusas), Jeremy Martinez
+   (@JeremyMartinez51), Le Roy Christophe, Ionut Ionita
+   (@ionutrazvanionita), Ozzyboshi, Julián Moreno Patiño, Dusan
+   Klinec (@ph4r05), Mihai Tiganus (@tallicamike), Andrei Datcu
+   (@andrei-datcu), Matt Lehner, Anca Vamanu, Andrei Dragus,
+   Sergio Gutierrez.
 
    (1) including any documentation-related commits, excluding
    merge commits
@@ -1730,11 +1955,11 @@ Chapter 4. Documentation
 
 4.1. Contributors
 
-   Last edited by: Razvan Crainea (@razvancrainea), Bogdan-Andrei
-   Iancu (@bogdan-iancu), Liviu Chircu (@liviuchircu), Nick
-   Altmann (@nikbyte), Vlad Patrascu (@rvlad-patrascu), Alexey
-   Vasilyev (@vasilevalex), Peter Lemenkov (@lemenkov), Ionut
-   Ionita (@ionutrazvanionita), Vlad Paiu (@vladpaiu), Mihai
+   Last edited by: Liviu Chircu (@liviuchircu), Razvan Crainea
+   (@razvancrainea), wangdd, Vlad Patrascu (@rvlad-patrascu),
+   Bogdan-Andrei Iancu (@bogdan-iancu), Nick Altmann (@nikbyte),
+   Alexey Vasilyev (@vasilevalex), Peter Lemenkov (@lemenkov),
+   Ionut Ionita (@ionutrazvanionita), Vlad Paiu (@vladpaiu), Mihai
    Tiganus (@tallicamike), Andrei Datcu (@andrei-datcu), Matt
    Lehner, Anca Vamanu, Andrei Dragus, Sergio Gutierrez.
 

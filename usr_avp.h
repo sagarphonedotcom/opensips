@@ -99,6 +99,7 @@ struct usr_avp *search_index_avp(unsigned short flags,
 
 /* free functions */
 void reset_avps( );
+int  count_avps(unsigned short flags, int name);
 void destroy_avp( struct usr_avp *avp);
 void destroy_index_avp( unsigned short flags, int name, int index);
 int  destroy_avps( unsigned short flags, int name, int all);
@@ -119,6 +120,11 @@ int replace_avp(unsigned short flags, int name, int_str val, int index);
 /* global alias functions (manipulation and parsing)*/
 int get_avp_id(str *alias);
 int parse_avp_spec(const str *name, int *avp_name);
+
+/* manipulates bavp lists */
+struct usr_avp** set_bavp_list(struct usr_avp **list);
+struct usr_avp** get_bavp_list(void);
+struct usr_avp** reset_bavp_list(void);
 
 #endif
 

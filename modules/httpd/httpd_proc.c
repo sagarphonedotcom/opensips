@@ -530,7 +530,7 @@ MHD_RET answer_to_connection (void *cls, struct MHD_Connection *connection,
 					LM_ERR("got a truncated POST request\n");
 					return MHD_NO;
 				}
-				LM_DBG("got ContentType [%d] with len [%d]: %.*s\\n",
+				LM_DBG("got ContentType [%d] with len [%d]: %.*s\n",
 					pr->content_type, pr->content_len,
 					(int)*upload_data_size, upload_data);
 				/* Here we save data. */
@@ -705,9 +705,6 @@ int httpd_callback(int fd, void *dmn, int was_timeout)
 
 void httpd_proc(int rank)
 {
-#ifdef LIBMICROHTTPD
-	int max;
-#endif
 	struct httpd_cb *cb = httpd_cb_list;
 
 	/*child's initial settings*/
@@ -731,11 +728,13 @@ void httpd_proc(int rank)
 
 #ifdef LIBMICROHTTPD
 	unsigned int mhd_flags = MHD_USE_DEBUG;
+	unsigned int mhdi_flags;
 	int mhd_opt_n = 0;
-	char *key_pem;
- 	char *cert_pem;
-	struct sockaddr_in saddr_in;
+	char *key_pem, *cert_pem, *ip_repr, ip6buf[1+IP_ADDR_MAX_STR_SIZE+1];
+	void *saddr;
+	struct sockaddr_in saddr4;
 	struct MHD_OptionItem mhd_opts[4];
+	const union MHD_DaemonInfo *dmni;
 	int fd;
 
 	if (tls_key_file.s && tls_cert_file.s) {
@@ -780,27 +779,74 @@ void httpd_proc(int rank)
 	mhd_flags = mhd_flags | MHD_USE_EPOLL;
 	#endif
 
-	memset(&saddr_in, 0, sizeof(saddr_in));
-	if (ip.s)
-		saddr_in.sin_addr.s_addr = inet_addr(ip.s);
-	else
-		saddr_in.sin_addr.s_addr = INADDR_ANY;
-	saddr_in.sin_family = AF_INET;
-	saddr_in.sin_port = htons(port);
+#if ( MHD_VERSION >= 0x000092800 )
+	struct sockaddr_in6 saddr6;
+	if (ip.s && strcmp(ip.s, "*")) {
+		if (q_memchr(ip.s, ':', ip.len)) {
+			LM_DBG("preparing to listen on IPv6 interface '%s'\n", ip.s);
+			memset(&saddr6, 0, sizeof saddr6);
 
+			if (inet_pton(AF_INET6, ip.s, &saddr6.sin6_addr) <= 0) {
+				LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+				return;
+			}
 
-#if ( MHD_VERSION < 0x000092800 )
-	memcpy( &httpd_server_info, &saddr_in, sizeof(struct sockaddr_in) );
+			saddr6.sin6_family = AF_INET6;
+			saddr6.sin6_port = htons(port);
+			saddr = &saddr6;
+			sprintf(ip6buf, "[%s]", !strcmp(ip.s, "::0") ? "::" : ip.s);
+			ip_repr = ip6buf;
+			mhd_flags |= MHD_USE_IPv6;
+		} else {
+			LM_DBG("preparing to listen on IPv4 interface '%s'\n", ip.s);
+			memset(&saddr4, 0, sizeof saddr4);
+
+			if (inet_pton(AF_INET, ip.s, &saddr4.sin_addr) <= 0) {
+				LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+				return;
+			}
+
+			saddr4.sin_family = AF_INET;
+			saddr4.sin_port = htons(port);
+			saddr = &saddr4;
+			ip_repr = ip.s;
+		}
+	} else {
+		LM_DBG("preparing to listen on all IPv6 + IPv4 interfaces\n");
+		memset(&saddr6, 0, sizeof saddr6);
+
+		saddr6.sin6_addr = in6addr_any;
+		saddr6.sin6_family = AF_INET6;
+		saddr6.sin6_port = htons(port);
+		saddr = &saddr6;
+		ip_repr = "*";
+
+		mhd_flags |= MHD_USE_DUAL_STACK;
+	}
+#else
+	memset(&saddr4, 0, sizeof saddr4);
+	saddr4.sin_family = AF_INET;
+	saddr4.sin_port = htons(port);
+	saddr = &saddr4;
+
+	if (ip.s) {
+		saddr4.sin_addr.s_addr = inet_addr(ip.s);
+		ip_repr = ip.s;
+	} else {
+		saddr4.sin_addr.s_addr = INADDR_ANY;
+		ip_repr = "0.0.0.0";
+	}
+
+	memcpy( &httpd_server_info, &saddr, sizeof(struct sockaddr_in) );
 	httpd_server_info.sin.sin_port = port;
 #endif
 
-
 	LM_DBG("init_child [%d] - [%d] HTTP Server init [%s:%d]\n",
-		rank, getpid(), (ip.s?ip.s:"INADDR_ANY"), port);
-	set_proc_attrs("HTTPD %s:%d", (ip.s?ip.s:"INADDR_ANY"), port);
+		rank, getpid(), ip_repr, port);
+	set_proc_attrs("HTTPD %s:%d", ip_repr, port);
 	dmn = MHD_start_daemon(mhd_flags, port, NULL, NULL,
 			&(answer_to_connection), NULL,
-			MHD_OPTION_SOCK_ADDR, &saddr_in,
+			MHD_OPTION_SOCK_ADDR, saddr,
 			MHD_OPTION_ARRAY, mhd_opts,
 			MHD_OPTION_END);
 
@@ -815,20 +861,28 @@ void httpd_proc(int rank)
 	 * So, we "learn" that fd right now and bypass MHD_get_fdset() on
 	 * further iterations.*/
 
-	max = 0;
 	FD_ZERO (&mhd_rs);
 	FD_ZERO (&mhd_ws);
 	FD_ZERO (&mhd_es);
-	if (MHD_YES != MHD_get_fdset (dmn, &mhd_rs, &mhd_ws, &mhd_es, &max)) {
+	MHD_get_fdset (dmn, &mhd_rs, &mhd_ws, &mhd_es, NULL);
+
+#if (MHD_VERSION <= 0x00095100)
+	mhdi_flags = MHD_DAEMON_INFO_EPOLL_FD_LINUX_ONLY;
+#else
+	mhdi_flags = MHD_DAEMON_INFO_EPOLL_FD;
+#endif
+
+	dmni = MHD_get_daemon_info(dmn, mhdi_flags);
+	if (!dmni) {
 		LM_ERR("unable to get file descriptors\n");
 		return;
 	}
+#if (MHD_VERSION <= 0x00095200)
+	fd = dmni->listen_fd;
+#else
+	fd = dmni->epoll_fd;
+#endif
 
-	for (fd=0 ; fd<FD_SETSIZE && !FD_ISSET(fd,&mhd_rs); fd++);
-	if (fd==FD_SETSIZE) {
-		LM_ERR("unable to find the epoll ctl fd\n");
-		return;
-	}
 	LM_DBG("found [%d] epoll ctl fd\n",fd);
 
 	if (reactor_proc_init( "HTTPD" )<0) {
@@ -866,8 +920,10 @@ static char * load_file(char * filename)
 	fseek(f, 0, SEEK_END);
 	long fsize = ftell(f);
 
-	if(fsize == 0)
+	if(fsize == 0) {
+		fclose(f);
 		return NULL;
+	}
 
 	fseek(f, 0, SEEK_SET);
 
@@ -877,7 +933,7 @@ static char * load_file(char * filename)
 	bread = fread(string, 1, fsize, f);
 	if (bread == 0 || ferror(f))
 		LM_ERR("error while reading from %s (bytes read: %lu)\n",
-				filename, bread);
+				filename, (unsigned long)bread);
 	fclose(f);
 
 	string[fsize] = 0;

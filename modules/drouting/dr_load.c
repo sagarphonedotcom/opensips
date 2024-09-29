@@ -34,12 +34,24 @@
 #include "../../mem/rpm_mem.h"
 #include "../../time_rec.h"
 #include "../../socket_info.h"
+#include "../../status_report.h"
 
 #include "dr_load.h"
 #include "routing.h"
 #include "prefix_tree.h"
 #include "parse.h"
 #include "dr_db_def.h"
+
+
+extern void *dr_srg;
+
+enum dr_gw_socket_filter_mode {
+	DR_GW_SOCK_FILTER_MODE_NONE=0,
+	DR_GW_SOCK_FILTER_MODE_IGNORE,
+	DR_GW_SOCK_FILTER_MODE_MATCH
+};
+
+enum dr_gw_socket_filter_mode gw_sock_filter = DR_GW_SOCK_FILTER_MODE_NONE;
 
 
 #define check_val2( _col, _val, _type1, _type2, _not_null, _is_empty_str) \
@@ -76,6 +88,23 @@
 		} \
 	}while(0)
 
+
+int dr_set_gw_sock_filter_mode(char *mode)
+{
+	if ( strcasecmp( mode, "none")==0 ) {
+		gw_sock_filter = DR_GW_SOCK_FILTER_MODE_NONE;
+		return 0;
+	}
+	if ( strcasecmp( mode, "ignore")==0 ) {
+		gw_sock_filter = DR_GW_SOCK_FILTER_MODE_IGNORE;
+		return 0;
+	}
+	if ( strcasecmp( mode, "matched-only")==0 ) {
+		gw_sock_filter = DR_GW_SOCK_FILTER_MODE_MATCH;
+		return 0;
+	}
+	return -1;
+}
 
 static int add_rule(rt_data_t *rdata, char *grplst, str *prefix,
 		rt_info_t *rule, osips_malloc_f malloc_f, osips_free_f free_f)
@@ -269,7 +298,9 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 	rt_info_t *ri;
 	rt_data_t *rdata;
 	tmrec_expr *time_rec;
-	int i, j, n, tot_gw = 0, tot_cr = 0, tot_rl = 0;
+	int i, j, n;
+	int loaded_gw = 0, loaded_cr = 0, loaded_rl = 0;
+	int discarded_gw = 0, discarded_cr = 0, discarded_rl = 0;
 	int no_rows = 10;
 	int db_cols;
 	struct socket_info *sock;
@@ -280,6 +311,9 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 	res = 0;
 	ri = 0;
 	rdata = 0;
+
+	sr_add_report( dr_srg, STR2CI(part->partition),
+		CHAR_INT("starting DB data loading"), 0 /*is_public*/);
 
 	/* init new data structure */
 	if ( (rdata=build_rt_data(part))==0 ) {
@@ -369,7 +403,8 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 			int_vals[INT_VALS_PROBE_DRD_COL] = VAL_INT(ROW_VALUES(row)+7);
 			/* SOCKET column */
 			check_val( sock_drd_col, ROW_VALUES(row)+8, DB_STRING, 0, 0);
-			if ( !VAL_NULL(ROW_VALUES(row)+8) &&
+			if ( gw_sock_filter!=DR_GW_SOCK_FILTER_MODE_IGNORE &&
+					!VAL_NULL(ROW_VALUES(row)+8) &&
 					(s_sock.s=(char*)VAL_STRING(ROW_VALUES(row)+8))[0]!=0 ) {
 				s_sock.len = strlen(s_sock.s);
 				if (parse_phostport( s_sock.s, s_sock.len, &host.s, &host.len,
@@ -382,6 +417,8 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 				} else {
 					sock = grep_internal_sock_info( &host, port, proto);
 					if (sock == NULL) {
+						if (gw_sock_filter==DR_GW_SOCK_FILTER_MODE_MATCH)
+							continue;
 						LM_ERR("GW <%s>(%s): socket <%.*s> is not local to "
 								"OpenSIPS (we must listen on it) -> ignoring socket\n",
 								str_vals[STR_VALS_GWID_DRD_COL],
@@ -420,9 +457,10 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 				LM_ERR("failed to add destination <%s>(%s) -> skipping\n",
 						str_vals[STR_VALS_GWID_DRD_COL],
 						str_vals[STR_VALS_ID_DRD_COL]);
+				discarded_gw++;
 				continue;
 			}
-			tot_gw++;
+			loaded_gw++;
 		}
 		if (DB_CAPABILITY(*dr_dbf, DB_CAP_FETCH)) {
 			if(dr_dbf->fetch_result(db_hdl, &res, no_rows)<0) {
@@ -540,9 +578,10 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 							part->free) != 0 ) {
 					LM_ERR("failed to add carrier db_id <%s> -> skipping\n",
 							str_vals[STR_VALS_ID_DRC_COL]);
+					discarded_cr++;
 					continue;
 				}
-				tot_cr++;
+				loaded_cr++;
 			}
 			if (DB_CAPABILITY(*dr_dbf, DB_CAP_FETCH)) {
 				if(dr_dbf->fetch_result(db_hdl, &res, no_rows)<0) {
@@ -642,7 +681,7 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 							ROW_VALUES(row)+7);
 				}
 				/* SORT_PROFILE column */
-				check_val(sort_profile_drr_col, ROW_VALUES(row)+8, DB_INT, 0, 0);
+				check_val2(sort_profile_drr_col, ROW_VALUES(row)+8, DB_INT, DB_BIGINT, 0, 0);
 				int_vals[INT_VALS_QR_PROFILE_DRR_COL] = VAL_INT(ROW_VALUES(row)+8);
 				/* ATTRS column */
 				check_val2( attrs_drr_col, ROW_VALUES(row)+9, DB_STRING, DB_BLOB, 0, 0);
@@ -661,7 +700,7 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 						int_vals[INT_VALS_RULE_ID_DRR_COL]);
 					continue;
 				}
-				/* set the script route ID */
+				/* set the script route name */
 				if ( VAL_NULL(ROW_VALUES(row)+5) ||
 				((str_vals[STR_VALS_ROUTEID_DRR_COL]=
 					(char*)VAL_STRING(ROW_VALUES(row)+5))==NULL ) ||
@@ -689,6 +728,7 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 					LM_ERR("failed to add rule id %d -> skipping\n",
 							int_vals[INT_VALS_RULE_ID_DRR_COL]);
 					free_rt_info(ri, part->free);
+					discarded_rl++;
 					continue;
 				}
 				n++;
@@ -712,25 +752,42 @@ rt_data_t* dr_load_routing_info(struct head_db *part,
 		if (custom_rule_tables)
 			LM_NOTICE("loaded %d rules from table '%.*s'\n", n,
 			          rules_tables[j].len, rules_tables[j].s);
-		tot_rl += n;
+		loaded_rl += n;
 	}
 
-	LM_NOTICE("loaded %d gateways in partition '%.*s'\n", tot_gw,
-	         part->partition.len, part->partition.s);
+	LM_INFO("loaded %d (discarded %d) gateways in partition '%.*s'\n",
+		loaded_gw, discarded_gw,
+		part->partition.len, part->partition.s);
 
-	LM_NOTICE("loaded %d carriers in partition '%.*s'\n", tot_cr,
-	         part->partition.len, part->partition.s);
+	LM_INFO("loaded %d (discarded %d) carriers in partition '%.*s'\n",
+		loaded_cr, discarded_cr,
+		part->partition.len, part->partition.s);
 
 	if (custom_rule_tables)
-		LM_NOTICE("loaded %d rules from %d table%s in partition '%.*s'\n",
-		     tot_rl, rules_tables_no, rules_tables_no != 1 ? "s":"",
-		     part->partition.len, part->partition.s);
+		LM_INFO("loaded %d (discarded %d) rules from %d table%s in "
+			"partition '%.*s'\n", loaded_rl, discarded_rl, rules_tables_no,
+			rules_tables_no != 1 ? "s":"",
+			part->partition.len, part->partition.s);
 	else
-		LM_NOTICE("loaded %d rules in partition '%.*s'\n",
-		     tot_rl, part->partition.len, part->partition.s);
+		LM_NOTICE("loaded %d (discarded %d) rules in partition '%.*s'\n",
+			loaded_rl, discarded_rl,
+			 part->partition.len, part->partition.s);
+
+	/* do the reporting */
+	sr_add_report( dr_srg, STR2CI(part->partition),
+		CHAR_INT("DB data loading successfully completed"), 0 /*is_public*/);
+	sr_add_report_fmt( dr_srg, STR2CI(part->partition), 0 /*is_public*/,
+			"%d gateways loaded (%d discarded), "
+			"%d carriers loaded (%d discarded), "
+			"%d rules loaded (%d discarded)",
+		loaded_gw, discarded_gw,
+		loaded_cr, discarded_cr,
+		loaded_rl, discarded_rl);
 
 	return rdata;
 error:
+	sr_add_report( dr_srg, STR2CI(part->partition),
+		CHAR_INT("DB data loading failed, discarding"), 0 /*is_public*/);
 	if (res)
 		dr_dbf->free_result(db_hdl, res);
 	if (rdata)

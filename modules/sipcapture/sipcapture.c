@@ -396,21 +396,6 @@ static str msg_column6 		= str_init("data");
 /* hep pvar related */
 static str afinet_str    = str_init("AF_INET");
 static str afinet6_str   = str_init("AF_INET6");
-/* hep capture proto types */
-static str hep_net_protos[]={
-	/* want same index as in opensips enum */
-	{NULL, 0},
-	str_init("UDP"),
-	str_init("TCP"),
-	str_init("TLS"),
-	str_init("SCTP"),
-	str_init("WS"),
-	str_init("WSS"),
-	str_init("BIN"),
-	str_init("HEP_UDP"),
-	str_init("HEP_TCP"),
-	{NULL, 0}
-};
 
 static str hep_app_protos[]= {
 	str_init("reserved"),
@@ -436,13 +421,13 @@ static char payload_buf[MAX_PAYLOAD];
 
 
 
-#define VALUES_STR "(%ld,%lld,'%.*s','%.*s','%.*s','%.*s','%.*s','%.*s'," \
+#define VALUES_STR "(%lld,%lld,'%.*s','%.*s','%.*s','%.*s','%.*s','%.*s'," \
 					"'%.*s','%.*s','%.*s','%.*s','%.*s','%.*s','%.*s','%.*s','%.*s'," \
 					"'%.*s','%.*s','%.*s','%.*s','%.*s','%.*s',%d,'%.*s',%d," \
 					"'%.*s',%d,'%.*s',%d,%d,%d,'%.*s',%d,'%.*s','%.*s','%.*s'," \
 					"'%.*s', '%.*s', '%.*s', '%.*s', '%.*s', '%.*s')"
 
-#define RTCP_VALUES_STR "(%ld, %lld, '%.*s', '%.*s', %d, '%.*s', %d," \
+#define RTCP_VALUES_STR "(%lld, %lld, '%.*s', '%.*s', %d, '%.*s', %d," \
 						"%d, %d, %d, '%.*s', '%.*s')"
 
 int  max_async_queries=5;
@@ -461,10 +446,8 @@ int bpf_on = 0;
 char* hep_route=0;
 str hep_route_s;
 
-#define HEP_NO_ROUTE -1
-#define HEP_SIP_ROUTE 0
-static char* hep_route_name=NULL;
-static int hep_route_id=HEP_SIP_ROUTE;
+static char* hep_route_name="sip";
+static struct script_route_ref *hep_route_ref=NULL;
 
 str raw_socket_listen = { 0, 0 };
 str raw_interface = { 0, 0 };
@@ -505,7 +488,7 @@ static str hep_str={hepbuf, 0};
 /*! \brief
  * Exported functions
  */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"sip_capture", (cmd_function)sip_capture, {
 		{CMD_PARAM_STR | CMD_PARAM_OPT, sip_capture_fix_table, 0},
 		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0},
@@ -539,7 +522,7 @@ static cmd_export_t cmds[] = {
 	{0, 0, {{0, 0, 0}}, 0}
 };
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 	{"sip_capture",    (acmd_function)async_sip_capture, {
 		{CMD_PARAM_STR | CMD_PARAM_OPT, sip_capture_async_fix_table, 0},
 		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0},
@@ -561,7 +544,7 @@ static proc_export_t procs[] = {
 /*! \brief
  * Exported parameters
  */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"db_url",			STR_PARAM, &db_url.s            },
 	{"table_name",       		STR_PARAM, &table_name.s	},
 	{"rtcp_table_name",			STR_PARAM, &rtcp_table_name.s	},
@@ -623,7 +606,7 @@ static param_export_t params[] = {
 /*! \brief
  * MI commands
  */
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "sip_capture", 0, 0, 0, {
 		{sip_capture_mi, {0}},
 		{sip_capture_mi_1, {"capture_mode", 0}},
@@ -637,14 +620,14 @@ static mi_export_t mi_cmds[] = {
 stat_var* sipcapture_req;
 stat_var* sipcapture_rpl;
 
-stat_export_t sipcapture_stats[] = {
+static const stat_export_t sipcapture_stats[] = {
 	{"captured_requests" ,  0,  &sipcapture_req  },
 	{"captured_replies"  ,  0,  &sipcapture_rpl  },
 	{0,0,0}
 };
 #endif
 
-static module_dependency_t *get_deps_hep(param_export_t *param)
+static module_dependency_t *get_deps_hep(const param_export_t *param)
 {
 	int hep_on = *(int *)param->param_pointer;
 
@@ -656,7 +639,7 @@ static module_dependency_t *get_deps_hep(param_export_t *param)
 
 
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_SQLDB, NULL, DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -670,7 +653,7 @@ static dep_export_t deps = {
  /**
  * pseudo-variables
  */
-static pv_export_t mod_items[] = {
+static const pv_export_t mod_items[] = {
 	{{"hep_net", sizeof("hep_net")-1}, 1201, pv_get_hep_net, 0,
 		pv_parse_hep_net_name, 0, 0, 0},
 	{{"HEPVERSION", sizeof("HEPVERSION")-1}, 1202, pv_get_hep_version, 0,
@@ -731,14 +714,15 @@ static int parse_hep_route(char *val)
 
 	if ( route_name.len == hep_no_route.len &&
 			strncasecmp(route_name.s, hep_no_route.s, hep_no_route.len ) == 0) {
-		hep_route_id = HEP_NO_ROUTE;
+		hep_route_ref = NULL;
 	} else if ( route_name.len == hep_sip_route.len &&
 			strncasecmp(route_name.s, hep_sip_route.s, hep_sip_route.len ) == 0) {
-		hep_route_id = HEP_SIP_ROUTE;
+		hep_route_ref = ref_script_route_by_name( "0",
+			sroutes->request, RT_NO, REQUEST_ROUTE, 0);
 	} else {
-		hep_route_id=get_script_route_ID_by_name( route_name.s,
-			sroutes->request, RT_NO);
-		if ( hep_route_id == -1 ) {
+		hep_route_ref = ref_script_route_by_name( route_name.s,
+			sroutes->request, RT_NO, REQUEST_ROUTE, 0);
+		if ( !ref_script_route_is_valid(hep_route_ref) ) {
 			LM_ERR("route <%s> not defined!\n", route_name.s);
 			return -1;
 		}
@@ -790,11 +774,9 @@ static int mod_init(void) {
 			return -1;
 		}
 
-		if (hep_route_name != NULL) {
-			if ( parse_hep_route(hep_route_name) < 0 ) {
-				LM_ERR("bad hep route name %s\n", hep_route_name);
-				return -1;
-			}
+		if ( parse_hep_route(hep_route_name) < 0 ) {
+			LM_ERR("bad hep route name %s\n", hep_route_name);
+			return -1;
 		}
 
 		set_rtcp_keys();
@@ -802,7 +784,7 @@ static int mod_init(void) {
 		/* db_url is mandatory if sip_capture is used */
 		if (((is_script_func_used("sip_capture", -1) ||
 				is_script_async_func_used("sip_capture", -1)) ||
-				hep_route_id == HEP_NO_ROUTE) ||
+				hep_route_ref == NULL) ||
 			(is_script_func_used("report_capture", -1) ||
 				is_script_async_func_used("report_capture", -1))) {
 			init_db_url(db_url, 0);
@@ -1076,7 +1058,7 @@ static int cfg_validate(void)
 		/* db_url is mandatory if sip_capture is used */
 		if (((is_script_func_used("sip_capture", -1) ||
 				is_script_async_func_used("sip_capture", -1)) ||
-				hep_route_id == HEP_NO_ROUTE) ||
+				hep_route_ref == NULL) ||
 			(is_script_func_used("report_capture", -1) ||
 				is_script_async_func_used("report_capture", -1)))
 		{
@@ -1470,6 +1452,7 @@ static int get_hep_chunk(struct hepv3* h3, unsigned int chunk_id,
 
 	str addr_str;
 	str payload_str;
+	str proto_name;
 	hep_str.len = 0;
 
 	res->rs    = hep_str;
@@ -1498,7 +1481,10 @@ static int get_hep_chunk(struct hepv3* h3, unsigned int chunk_id,
 					h3->hg.ip_proto.data);
 			return -1;
 		}
-		SET_PVAL_STR(res, hep_net_protos[h3->hg.ip_proto.data]);
+		if ( (proto_name.s = get_proto_name(h3->hg.ip_proto.data))==NULL)
+			proto_name.s = "n/a";
+		proto_name.len = strlen(proto_name.s);
+		SET_PVAL_STR(res, proto_name);
 
 		break;
 	/* ipv4/6 source
@@ -1751,6 +1737,7 @@ static int pv_get_hep_net(struct sip_msg *msg, pv_param_t *param,
 	struct receive_info *ri;
 
 	str addr_str;
+	str proto_name;
 
 	if (msg == NULL)
 	{
@@ -1800,7 +1787,10 @@ static int pv_get_hep_net(struct sip_msg *msg, pv_param_t *param,
 					ri->proto);
 			return -1;
 		}
-		SET_PVAL_STR(res, hep_net_protos[ri->proto]);
+		if ( (proto_name.s = get_proto_name(ri->proto))==NULL)
+			proto_name.s = "n/a";
+		proto_name.len = strlen(proto_name.s);
+		SET_PVAL_STR(res, proto_name);
 
 		break;
 	/* ipv4 source */
@@ -1983,9 +1973,9 @@ set_generic_hep_chunk(struct hepv3* h3, unsigned chunk_id, str *data)
 		/** possible values(string)
 		 * ip address in human readable format
 		 */
-		if (inet_pton(AF_INET, data->s, &h3->addr.ip4_addr.src_ip4.data) == 0) {
+		if (inet_pton(AF_INET, data->s, &h3->addr.ip4_addr.src_ip4.data) <= 0) {
 			/* check if it's ipV6*/
-			if (inet_pton(AF_INET6, data->s, &h3->addr.ip6_addr.src_ip6.data) == 0) {
+			if (inet_pton(AF_INET6, data->s, &h3->addr.ip6_addr.src_ip6.data) <= 0) {
 				RETURN_ERROR("address <<%.*s>> it's neither IPv4 nor IPv6!\n",
 							data->len, data->s);
 			} else {
@@ -2014,9 +2004,9 @@ set_generic_hep_chunk(struct hepv3* h3, unsigned chunk_id, str *data)
 		/** possible values(string)
 		 * ip address in human readable format
 		 */
-		if (inet_pton(AF_INET, data->s, &h3->addr.ip4_addr.dst_ip4.data) == 0) {
+		if (inet_pton(AF_INET, data->s, &h3->addr.ip4_addr.dst_ip4.data) <= 0) {
 			/* check if it's ipV6*/
-			if (inet_pton(AF_INET6, data->s, &h3->addr.ip6_addr.dst_ip6.data) == 0) {
+			if (inet_pton(AF_INET6, data->s, &h3->addr.ip6_addr.dst_ip6.data) <= 0) {
 				RETURN_ERROR("address <<%.*s>> it's neither IPv4 nor IPv6!\n",
 							data->len, data->s);
 			} else {
@@ -2401,7 +2391,7 @@ int hep_msg_received(void)
 		return 0;
 	}
 
-	if ( hep_route_id == HEP_NO_ROUTE ) {
+	if ( hep_route_ref == NULL ) {
 		memset(&msg, 0, sizeof(struct sip_msg));
 
 		switch (h->version) {
@@ -2445,7 +2435,8 @@ int hep_msg_received(void)
 
 		/* don't go through the main route */
 		return HEP_SCRIPT_SKIP;
-	} else if (hep_route_id > HEP_SIP_ROUTE) {
+	} else if (ref_script_route_is_valid(hep_route_ref) &&
+	hep_route_ref->idx > 0 /*default req route*/) {
 
 		/* builds a dummy message */
 		p_msg = get_dummy_sip_msg();
@@ -2458,7 +2449,7 @@ int hep_msg_received(void)
 		set_route_type( REQUEST_ROUTE );
 
 		/* run given hep route */
-		run_top_route( sroutes->request[hep_route_id], p_msg);
+		run_top_route( sroutes->request[hep_route_ref->idx], p_msg);
 
 		/* free possible loaded avps */
 		reset_avps();
@@ -2800,7 +2791,7 @@ static inline int append_sc_values(char* buf, int max_len, db_val_t* db_vals)
 	int len;
 
 	len = snprintf(buf, max_len, VALUES_STR,
-			VAL_TIME(db_vals+1), VAL_BIGINT(db_vals+2),
+			(long long)VAL_TIME(db_vals+1), VAL_BIGINT(db_vals+2),
 			VAL_STR(db_vals+3).len, VAL_STR(db_vals+3).s,
 			VAL_STR(db_vals+4).len, VAL_STR(db_vals+4).s,
 			VAL_STR(db_vals+5).len, VAL_STR(db_vals+5).s,
@@ -2945,7 +2936,10 @@ db_async_store(db_val_t* vals, db_key_t* keys, int num_keys,
 	async_status = ASYNC_NO_IO;
 
 	return 1;
+
 no_buffer:
+	if (HAVE_SHARED_QUERIES)
+		RELEASE_QUERY_LOCK(crt_as_query);
 	LM_ERR("buffer size exceeded\n");
 	return -1;
 }
@@ -3732,14 +3726,14 @@ static int w_set_hep(struct sip_msg* msg, void *id, str *data_s,
 		data_len = data_s->len;
 	} else if (data_type == TYPE_INET_ADDR) {
 		data_len = sizeof(struct in_addr);
-		if (inet_pton(AF_INET, data_s->s, &addr4)==0) {
+		if (inet_pton(AF_INET, data_s->s, &addr4)<=0) {
 			LM_ERR("not an IPv4 address <<%.*s>>!\n",
 					data_s->len, data_s->s);
 			return -1;
 		}
 	} else if (data_type == TYPE_INET6_ADDR) {
 		data_len = sizeof(struct in6_addr);
-		if (inet_pton(AF_INET6, data_s->s, &addr6)==0) {
+		if (inet_pton(AF_INET6, data_s->s, &addr6)<=0) {
 			LM_ERR("not an IPv6 address <<%.*s>>!\n",
 					data_s->len, data_s->s);
 			return -1;
@@ -4496,7 +4490,7 @@ static inline int append_rc_values(char* buf, int max_len, db_val_t* db_vals)
 	int len;
 
 	len = snprintf(buf, max_len, RTCP_VALUES_STR,
-			VAL_TIME(db_vals+0), VAL_BIGINT(db_vals+1),
+			(long long)VAL_TIME(db_vals+0), VAL_BIGINT(db_vals+1),
 			VAL_STR(db_vals+2).len, VAL_STR(db_vals+2).s,
 			VAL_STR(db_vals+3).len, VAL_STR(db_vals+3).s,
 			VAL_INT(db_vals+4),

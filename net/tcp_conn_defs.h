@@ -38,6 +38,7 @@
 
 #include "../locking.h"
 #include "../ip_addr.h"
+#include "tcp_conn_profile.h"
 
 /* keepalive */
 #ifndef NO_TCP_KEEPALIVE
@@ -98,6 +99,12 @@ struct tcp_conn_alias{
 	unsigned short hash;			/*!< hash index in the address hash */
 };
 
+enum tcp_conn_alias_mode {
+	TCP_ALIAS_NEVER,
+	TCP_ALIAS_RFC_5923, /*!< only alias a connection if Via ";alias" exists */
+	TCP_ALIAS_ALWAYS,
+};
+
 
 struct tcp_async_chunk {
 	char *buf; /* buffer that needs to be sent out */
@@ -118,6 +125,25 @@ struct tcp_async_data {
 	struct tcp_async_chunk *chunks[0];
 };
 
+struct tcp_conn_profile {
+	unsigned int connect_timeout;
+	unsigned int con_lifetime;
+
+	unsigned int msg_read_timeout;
+	unsigned int send_threshold;
+	unsigned char no_new_conn:1;
+	unsigned char parallel_read:2;
+
+	enum tcp_conn_alias_mode alias_mode;
+
+	unsigned char keepalive:1;
+	unsigned int keepcount;
+	unsigned int keepidle;
+	unsigned int keepinterval;
+
+	int attrs[TCP_ATTR_COUNT]; /* use (enum tcp_conn_attr) as index */
+	unsigned int id; /* unique profile identifier (default profile ID is 0) */
+};
 
 /*! \brief TCP connection structure */
 struct tcp_connection{
@@ -149,6 +175,7 @@ struct tcp_connection{
 	unsigned int msg_attempts;	/*!< how many read attempts we have done for the last request */
 	/*!< connection related flags */
 	unsigned short flags;
+	struct tcp_conn_profile profile;
 	/*!< protocol related & reserved flags */
 	unsigned short proto_flags;
 	struct struct_hist *hist;
@@ -158,9 +185,12 @@ struct tcp_connection{
 };
 
 
-/*! \brief add port as an alias for the "id" connection
+/*! \brief add port as an alias for the "id" connection, as long as the conn
+ * profile allows aliasing and, optionally, the Via header includes ";alias".
+ * Note: pass a NULL @msg in order to unconditionally add the alias
+ *
  * \return 0 on success,-1 on failure */
-int tcpconn_add_alias(unsigned int id, int port, int proto);
+int tcpconn_add_alias(struct sip_msg *msg, unsigned int id, int port, int proto);
 
 
 #define tcp_conn_set_lifetime( _c, _lt) \
@@ -170,6 +200,8 @@ int tcpconn_add_alias(unsigned int id, int port, int proto);
 			(_c)->lifetime = _timeout;\
 	}while(0)
 
+#define tcp_conn_reset_lifetime(_c) \
+	tcp_conn_set_lifetime(_c, (_c)->profile.con_lifetime)
 
 #endif
 

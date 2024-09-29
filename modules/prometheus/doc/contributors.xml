@@ -21,13 +21,29 @@
 	<row>
 		<entry>1. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">21</entry>
-		<entry align="center">10</entry>
-		<entry align="center">983</entry>
-		<entry align="center">119</entry>
+		<entry align="center">31</entry>
+		<entry align="center">17</entry>
+		<entry align="center">1283</entry>
+		<entry align="center">153</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
+		<entry>Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>)</entry>
+		<entry align="center">4</entry>
+		<entry align="center">2</entry>
+		<entry align="center">2</entry>
+		<entry align="center">3</entry>
+	</row>
+	<row>
+		<entry>3. </entry>
+		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
+		<entry align="center">3</entry>
+		<entry align="center">1</entry>
+		<entry align="center">1</entry>
+		<entry align="center">1</entry>
+	</row>
+	<row>
+		<entry>4. </entry>
 		<entry>OpenSIPS</entry>
 		<entry align="center">3</entry>
 		<entry align="center">1</entry>
@@ -65,10 +81,20 @@
 	<row>
 		<entry>1. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">Feb 2021 - May 2021</entry>
+		<entry align="center">Feb 2021 - Oct 2023</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
+		<entry>Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>)</entry>
+		<entry align="center">Feb 2023 - Feb 2023</entry>
+	</row>
+	<row>
+		<entry>3. </entry>
+		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
+		<entry align="center">Aug 2022 - Aug 2022</entry>
+	</row>
+	<row>
+		<entry>4. </entry>
 		<entry>OpenSIPS</entry>
 		<entry align="center">Feb 2021 - Feb 2021</entry>
 	</row>
@@ -86,7 +112,7 @@
 	<title>Documentation</title>
 <section id="documentation_contributors" xreflabel="documentation_contributors">
 	<title>Contributors</title>
-	<para><emphasis role='bold'>Last edited by:</emphasis> Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), OpenSIPS.</para>
+	<para><emphasis role='bold'>Last edited by:</emphasis> Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), OpenSIPS.</para>
 </section>
 
 </chapter>

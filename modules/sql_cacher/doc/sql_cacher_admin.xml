@@ -279,7 +279,8 @@ modparam("sql_cacher", "reload_interval", 5)
 	<section id="mi_sql_cacher_reload" xreflabel="sql_cacher_reload">
 		<title><function moreinfo="none">sql_cacher_reload</function></title>
 		<para>
-			Reloads the entire SQL table in cache in <emphasis>full caching</emphasis> mode.
+			Reloads the entire SQL table in cache or the single key (if key provided) in
+			<emphasis>full caching</emphasis> mode.
 		</para>
 		<para>
 			Reloads the given key or invalidates all the keys in cache in <emphasis>on demand</emphasis> mode.
@@ -290,8 +291,7 @@ modparam("sql_cacher", "reload_interval", 5)
 				<emphasis>id</emphasis> - the caching entry's id
 			</para></listitem>
 			<listitem><para>
-				<emphasis>key</emphasis> (optional) - the specific key to be reloaded, 
-				only makes sense in <emphasis>on demand</emphasis> mode.
+				<emphasis>key</emphasis> (optional) - the specific key to be reloaded.
 			</para></listitem>
 		</itemizedlist>
 		<example>
@@ -402,4 +402,61 @@ xlog("host name is: $sql_cached_value(carrier_fr_caching:host_name:2)");
 	</example>
 </section>
 
+
+	<section id="sr_identifiers" xreflabel="Status/Report Identifiers">
+	<title>Exported Status/Report Identifiers</title>
+
+	<para>
+	The module provides the "sql_cacher" Status/Report group, where each
+	full cache is defined as a separate SR identifier. NOTE that there
+	are no identifiers created for the on-demand caches.
+	</para>
+	<section id="sr_id_cache_entry_id" xreflabel="cache_entry_id">
+	<title><varname>[cache_entry_id]</varname></title>
+	<para>
+	The status of these identifiers reflects the readiness/status of the 
+	cached data (if available or not when being loaded from DB):
+	</para>
+	<itemizedlist>
+		<listitem><para>
+		<emphasis>-2</emphasis> - no data at all (initial status)
+		</para></listitem>
+		<listitem><para>
+		<emphasis>-1</emphasis> - no data, initial loading in progress
+		</para></listitem>
+		<listitem><para>
+		<emphasis>1</emphasis> - data loaded, partition ready
+		</para></listitem>
+		<listitem><para>
+		<emphasis>2</emphasis> - data available, a reload in progress
+		</para></listitem>
+	</itemizedlist>
+
+	<para>
+	In terms of reports/logs, the following events will be reported:
+	</para>
+	<itemizedlist>
+		<listitem><para>
+		starting DB data loading
+		</para></listitem>
+		<listitem><para>
+		DB data loading failed, discarding
+		</para></listitem>
+		<listitem><para>
+		DB data loading successfully completed
+		</para></listitem>
+		<listitem><para>
+		N records loaded)
+		</para></listitem>
+	</itemizedlist>
+	</section>
+
+	<para>
+	For how to access and use the Status/Report information, please see
+	<ulink url='>https://www.opensips.org/Documentation/Interface-StatusReport-3-3'>https://www.opensips.org/Documentation/Interface-StatusReport-3-3</ulink>.
+	</para>
+	</section>
+
+
 </chapter>
+

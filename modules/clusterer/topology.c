@@ -678,23 +678,10 @@ static int send_ls_update(node_info_t *node, clusterer_link_state new_ls)
 	return 0;
 }
 
-static inline int validate_update(int seq_no, int msg_seq_no, int timestamp,
-									int msg_timestamp, int val_type, int node_id)
-{
-	if (msg_seq_no == 0) {
-		if (seq_no == 0 && msg_timestamp <= timestamp)
-			return -1;
-	} else if (msg_seq_no <= seq_no)
-		return -1;
-
-	return 0;
-}
-
 static node_info_t *add_node(bin_packet_t *received, cluster_info_t *cl,
 								int src_node_id, str *str_vals, int *int_vals)
 {
 	node_info_t *new_node = NULL;
-	int lock_old_flag;
 
 	str_vals[STR_VALS_FLAGS_COL].s = 0;
 	str_vals[STR_VALS_DESCRIPTION_COL].s = 0;
@@ -703,20 +690,10 @@ static node_info_t *add_node(bin_packet_t *received, cluster_info_t *cl,
 	int_vals[INT_VALS_NODE_ID_COL] = src_node_id;
 	int_vals[INT_VALS_STATE_COL] = 1;	/* enabled */
 
-	lock_switch_write(cl_list_lock, lock_old_flag);
-
 	if (add_node_info(&new_node, &cl, int_vals, str_vals) != 0) {
 		LM_ERR("Unable to add node info to backing list\n");
-		lock_switch_read(cl_list_lock, lock_old_flag);
 		return NULL;
 	}
-	if (!new_node) {
-		LM_ERR("Unable to add node info to backing list\n");
-		lock_switch_read(cl_list_lock, lock_old_flag);
-		return NULL;
-	}
-
-	lock_switch_read(cl_list_lock, lock_old_flag);
 
 	return new_node;
 }
@@ -933,6 +910,7 @@ int set_link_w_neigh(clusterer_link_state new_ls, node_info_t *neigh)
 			lock_get(neigh->lock);
 		}
 		neigh->next_hop = neigh;
+
 	}
 
 	neigh->link_state = new_ls;
